@@ -1,5 +1,7 @@
 # mito_motility_2024
 
+[![DOI](https://zenodo.org/badge/836738016.svg)](https://zenodo.org/doi/10.5281/zenodo.13150979)
+
 Scripts used in Christina Gladkova's 2024 paper on mitochondrial motility.
 
 Contents:
