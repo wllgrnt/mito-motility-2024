@@ -1,2 +1,9 @@
-# mito-motility-2024
-Code used in upcoming mito motility paper
+# mito_motility_2024
+
+Scripts used in Christina Gladkova's 2024 paper on mitochondrial motility.
+
+Contents:
+- Gini plugin: used to generate Gini coefficients with CellProfiler, as part of a pipeline including e.g. image segmentation.
+- cellprofiler_output_analyser.py: Given a fixed input folder structure with CellProfiler CSV files, extracts the relevant data and stacks
+    into a tidier columnar format.
+- trackmate_analyser.ipynb: rotates all single-particle tracks to be a consistent direction and extracts e.g. the distribution of speeds.
