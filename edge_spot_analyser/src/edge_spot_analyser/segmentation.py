@@ -32,7 +32,8 @@ class NucleiSegmentationParams:
     threshold_lower_bound: float = 0.00195  # Absolute minimum threshold
     threshold_upper_bound: float = 0.01  # Absolute maximum threshold
     min_distance: int = 30  # Minimum distance between nuclei for declumping
-    smoothing_scale: float = 10.0  # Gaussian smoothing applied to image before thresholding
+    threshold_smoothing_scale: float = 2.0  # CP "Threshold smoothing scale" - smoothing before threshold
+    declump_smoothing_filter: int = 10  # CP "Size of smoothing filter" - for declumping
     discard_border_objects: bool = True  # Remove objects touching image border
 
     @property
@@ -110,10 +111,10 @@ def segment_nuclei(
     if params is None:
         params = NucleiSegmentationParams()
 
-    # Step 1: Apply Gaussian smoothing to image (threshold smoothing scale = 2.0 in CP)
-    # Note: CP's "threshold smoothing scale" of 2.0 gets converted to sigma = smoothing_scale/2
-    # For scale=2.0 → sigma=1.0, but we use 10.0 based on pipeline auto setting
-    smoothed = gaussian_filter(hoechst_image, sigma=params.smoothing_scale)
+    # Step 1: Apply Gaussian smoothing to image before thresholding
+    # CP "Threshold smoothing scale" of 2.0 → sigma = 1.0 (scale/2)
+    sigma = params.threshold_smoothing_scale / 2.0
+    smoothed = gaussian_filter(hoechst_image, sigma=sigma)
 
     # Step 2: Calculate 3-class Otsu thresholds
     # This returns 2 thresholds dividing into 3 classes: [background, intermediate, foreground]

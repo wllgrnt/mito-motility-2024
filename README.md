@@ -9,13 +9,9 @@ Contents:
 - cellprofiler_output_analyser.py: Given a fixed input folder structure with CellProfiler CSV files, extracts the relevant data and stacks
     into a tidier columnar format.
 - trackmate_analyser.ipynb: rotates all single-particle tracks to be a consistent direction and extracts e.g. the distribution of speeds.
-
-
-## 2025 additions:
-We needed to reanalyse all the CellProfiler output with new parameters. The previous workflow was:
-- Christina fits the parameters for that day's conditions (e.g. the Otsu threshold).
-- Christina runs CellProfiler on the set of images.
-- Christina hands me a set of csvs.
-- I run the output analyser script to parse the csvs into a more sensible form, that we can then plot, get descriptive stats on, etc.
-
-With the need to rerun everything I took the opportunity to overhaul the full pipeline from cellprofiler-form into a standalone python script. (see the edge_spot_analyser/ folder.)
+- edge_spot_analyser: We needed to reanalyse all the CellProfiler output with new parameters. The previous workflow was:
+    - Christina fits the parameters for that day's conditions (e.g. the Otsu threshold).
+    - Christina runs CellProfiler on the set of images.
+    - Christina hands me a set of csvs.
+    - I run the output analyser script to parse the csvs into a more sensible form, that we can then plot, get descriptive stats on, etc.
+    - With the need to rerun everything I took the opportunity to overhaul the full pipeline from cellprofiler-form into a standalone python script. (see the edge_spot_analyser/ folder.)

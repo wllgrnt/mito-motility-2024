@@ -19,7 +19,9 @@ Pipeline Version: v6
 
 import argparse
 import logging
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
 
@@ -46,6 +48,82 @@ from edge_spot_analyser.segmentation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _process_single_image(args: tuple) -> dict[str, Any]:
+    """
+    Process a single image pair. Module-level function for multiprocessing.
+
+    Args:
+        args: Tuple of (image_pair, image_number, nuclei_params, edge_spot_params, perinuclear_params)
+
+    Returns:
+        Dictionary with 'image_id', 'measurements' or 'error'
+    """
+    image_pair, image_number, nuclei_params, edge_spot_params, perinuclear_params = args
+
+    try:
+        # Load images
+        hoechst, miro = ImageLoader.load_image_pair(image_pair, normalize=True)
+
+        # Segment nuclei
+        nuclei_labels = segment_nuclei(hoechst, nuclei_params)
+        n_nuclei = nuclei_labels.max()
+
+        if n_nuclei == 0:
+            metadata = image_pair.to_metadata_dict(image_number)
+            return {
+                'image_id': image_pair.image_id,
+                'measurements': {
+                    'Nuclei': pd.DataFrame(),
+                    'Expand_Nuclei': pd.DataFrame(),
+                    'Perinuclear_region': pd.DataFrame(),
+                    'edge_spots': pd.DataFrame(),
+                    'Image': pd.DataFrame([metadata]),
+                }
+            }
+
+        # Create perinuclear regions
+        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = \
+            create_perinuclear_regions(nuclei_labels, perinuclear_params)
+
+        # Mask peripheral regions
+        masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px)
+
+        # Detect edge spots
+        edge_spots_labels = detect_edge_spots(masked_miro, edge_spot_params)
+        n_edge_spots = edge_spots_labels.max()
+
+        # Filter edge spots
+        if n_edge_spots > 0:
+            edge_spots_labels = filter_edge_spots_by_edge_intensity(
+                edge_spots_labels, miro, min_edge_intensity=0.0, max_edge_intensity=1.0
+            )
+
+        # Measure properties
+        metadata = image_pair.to_metadata_dict(image_number)
+        measurements = combine_measurements_for_export(
+            nuclei_labels=nuclei_labels,
+            expand_nuclei_labels=expand_nuclei_10px,
+            perinuclear_region_labels=perinuclear_ring,
+            edge_spots_labels=edge_spots_labels,
+            hoechst_image=hoechst,
+            miro_image=miro,
+            metadata=metadata
+        )
+
+        return {
+            'image_id': image_pair.image_id,
+            'measurements': measurements,
+            'n_nuclei': n_nuclei,
+            'n_edge_spots': edge_spots_labels.max()
+        }
+
+    except Exception as e:
+        return {
+            'image_id': image_pair.image_id,
+            'error': str(e)
+        }
 
 
 class Pipeline:
@@ -175,7 +253,8 @@ class Pipeline:
         self,
         input_dir: Path,
         output_dir: Path,
-        date: str
+        date: str,
+        n_workers: int = 1
     ) -> None:
         """
         Process all images for a specific date.
@@ -184,6 +263,7 @@ class Pipeline:
             input_dir: Input directory containing date subdirectories
             output_dir: Output directory for CSV files
             date: Date identifier
+            n_workers: Number of parallel workers (1 = sequential)
         """
         logger.info(f"Processing date: {date}")
 
@@ -196,16 +276,40 @@ class Pipeline:
 
         logger.info(f"Found {len(image_pairs)} image pairs")
 
-        # Process all images
+        # Prepare args for parallel processing
+        args_list = [
+            (pair, i, self.nuclei_params, self.edge_spot_params, self.perinuclear_params)
+            for i, pair in enumerate(image_pairs, start=1)
+        ]
+
         all_measurements = []
-        for i, image_pair in enumerate(image_pairs, start=1):
-            try:
-                measurements = self.process_image_pair(image_pair, image_number=i)
-                all_measurements.append(measurements)
-            except Exception as e:
-                logger.error(f"Error processing {image_pair.image_id}: {e}")
-                logger.exception(e)
-                continue
+
+        if n_workers == 1:
+            # Sequential processing
+            for args in args_list:
+                result = _process_single_image(args)
+                if 'error' in result:
+                    logger.error(f"Error processing {result['image_id']}: {result['error']}")
+                else:
+                    logger.info(f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots")
+                    all_measurements.append(result['measurements'])
+        else:
+            # Parallel processing
+            logger.info(f"Using {n_workers} parallel workers")
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(_process_single_image, args): args[0].image_id for args in args_list}
+
+                for future in as_completed(futures):
+                    image_id = futures[future]
+                    try:
+                        result = future.result()
+                        if 'error' in result:
+                            logger.error(f"Error processing {result['image_id']}: {result['error']}")
+                        else:
+                            logger.info(f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots")
+                            all_measurements.append(result['measurements'])
+                    except Exception as e:
+                        logger.error(f"Error processing {image_id}: {e}")
 
         # Export to CSV
         if all_measurements:
@@ -218,7 +322,8 @@ class Pipeline:
         self,
         input_dir: Path,
         output_dir: Path,
-        config: Optional[dict[str, dict[str, Any]]] = None
+        config: Optional[dict[str, dict[str, Any]]] = None,
+        n_workers: int = 1
     ) -> None:
         """
         Process all dates in the input directory.
@@ -227,6 +332,7 @@ class Pipeline:
             input_dir: Input directory containing date subdirectories
             output_dir: Output directory for CSV files
             config: Optional per-date parameter configuration
+            n_workers: Number of parallel workers
         """
         input_path = Path(input_dir)
 
@@ -250,7 +356,7 @@ class Pipeline:
 
             # Process this date
             try:
-                self.process_date_batch(input_dir, output_dir, date)
+                self.process_date_batch(input_dir, output_dir, date, n_workers=n_workers)
             except Exception as e:
                 logger.error(f"Error processing date {date}: {e}")
                 logger.exception(e)
@@ -347,7 +453,21 @@ Examples:
         help='Enable verbose logging'
     )
 
+    parser.add_argument(
+        '--workers', '-w',
+        type=int,
+        default=1,
+        help='Number of parallel workers (default: 1, use -1 for all CPUs)'
+    )
+
     args = parser.parse_args()
+
+    # Handle workers
+    n_workers = args.workers
+    if n_workers == -1:
+        n_workers = os.cpu_count() or 1
+    elif n_workers < 1:
+        n_workers = 1
 
     # Configure logging level
     if args.verbose:
@@ -367,10 +487,10 @@ Examples:
 
     if args.date:
         # Process single date
-        pipeline.process_date_batch(args.input, args.output, args.date)
+        pipeline.process_date_batch(args.input, args.output, args.date, n_workers=n_workers)
     else:
         # Process all dates
-        pipeline.process_all_dates(args.input, args.output, config)
+        pipeline.process_all_dates(args.input, args.output, config, n_workers=n_workers)
 
     elapsed_time = time.time() - start_time
     logger.info(f"Pipeline complete in {elapsed_time:.2f} seconds")
