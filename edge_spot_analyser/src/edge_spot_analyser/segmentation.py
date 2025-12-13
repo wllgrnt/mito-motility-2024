@@ -133,16 +133,16 @@ def segment_nuclei(
     # Step 4: Create binary mask
     binary = smoothed > threshold
 
-    # Step 5: Fill holes in binary mask
-    binary = ndimage.binary_fill_holes(binary)
-
-    # Step 6: Declump using intensity-based watershed
-    # Use distance transform to find seeds, then watershed with original intensity
+    # Step 5: Declump using intensity-based watershed
+    # Note: Fill holes AFTER declumping (CellProfiler: "After declumping only")
     labels = _declump_objects_watershed(
         binary,
         intensity_image=hoechst_image,
         min_distance=params.min_distance
     )
+
+    # Step 6: Fill holes in each labeled object (after declumping)
+    labels = _fill_holes_in_labels(labels)
 
     # Step 7: Filter by size
     labels = _filter_objects_by_size(labels, params.size_min, params.size_max)
@@ -203,6 +203,31 @@ def _declump_objects_watershed(
     )
 
     return labels
+
+
+def _fill_holes_in_labels(labels: np.ndarray) -> np.ndarray:
+    """
+    Fill holes in each labeled object independently.
+
+    This matches CellProfiler's "Fill holes after declumping only" behavior.
+
+    Args:
+        labels: Labeled image where each object has unique integer label
+
+    Returns:
+        Labeled image with holes filled in each object
+    """
+    output = np.zeros_like(labels)
+
+    for label_id in range(1, labels.max() + 1):
+        # Extract single object mask
+        obj_mask = labels == label_id
+        # Fill holes in this object
+        filled = ndimage.binary_fill_holes(obj_mask)
+        # Add back to output with original label
+        output[filled] = label_id
+
+    return output
 
 
 def _filter_objects_by_size(

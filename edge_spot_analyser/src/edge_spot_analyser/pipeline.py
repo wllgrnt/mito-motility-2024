@@ -64,7 +64,7 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
 
     try:
         # Load images
-        hoechst, miro = ImageLoader.load_image_pair(image_pair, normalize=True)
+        hoechst, miro = ImageLoader.load_image_pair(image_pair)
 
         # Segment nuclei
         nuclei_labels = segment_nuclei(hoechst, nuclei_params)
@@ -165,7 +165,7 @@ class Pipeline:
         logger.info(f"Processing {image_pair.image_id}")
 
         # Load images
-        hoechst, miro = ImageLoader.load_image_pair(image_pair, normalize=True)
+        hoechst, miro = ImageLoader.load_image_pair(image_pair)
 
         # Step 1: Segment nuclei (Module 7)
         logger.debug("  Segmenting nuclei...")

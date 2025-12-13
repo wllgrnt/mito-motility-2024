@@ -206,16 +206,18 @@ class ImageLoader:
     """Load and normalize microscopy images."""
 
     @staticmethod
-    def load_image(file_path: Path, normalize: bool = True) -> np.ndarray:
+    def load_image(file_path: Path) -> np.ndarray:
         """
         Load a microscopy image from disk.
 
+        Images are scaled to 0-1 range based on dtype (16-bit -> /65535).
+        No min-max stretching is applied to preserve absolute intensity values.
+
         Args:
             file_path: Path to image file (TIF format)
-            normalize: Whether to normalize to 0-1 range (default True)
 
         Returns:
-            2D float array normalized to 0-1 (if normalize=True)
+            2D float32 array in 0-1 range
         """
         # Load image
         image = io.imread(str(file_path))
@@ -235,34 +237,28 @@ class ImageLoader:
             # Take first channel or max projection
             image = image.max(axis=0) if image.shape[0] < image.shape[-1] else image[0]
 
-        # Normalize to 0-1 range
-        if normalize:
-            min_val = image.min()
-            max_val = image.max()
-            if max_val > min_val:
-                image = (image - min_val) / (max_val - min_val)
-            else:
-                image = np.zeros_like(image)
+        # Note: We don't apply min-max normalization here because:
+        # 1. CellProfiler uses raw 0-65535 -> 0-1 scaling (dtype-based only)
+        # 2. Min-max stretching destroys absolute intensity values needed for measurements
+        # The dtype-based scaling above already converts to 0-1 range
 
         return image
 
     @staticmethod
     def load_image_pair(
-        image_pair: ImagePair,
-        normalize: bool = True
+        image_pair: ImagePair
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Load a matched pair of Hoechst and MIRO160mer images.
 
         Args:
             image_pair: ImagePair object with file paths
-            normalize: Whether to normalize to 0-1 range
 
         Returns:
             Tuple of (hoechst_image, miro_image) as 2D float arrays
         """
-        hoechst = ImageLoader.load_image(image_pair.hoechst_path, normalize=normalize)
-        miro = ImageLoader.load_image(image_pair.miro_path, normalize=normalize)
+        hoechst = ImageLoader.load_image(image_pair.hoechst_path)
+        miro = ImageLoader.load_image(image_pair.miro_path)
 
         # Ensure same dimensions
         if hoechst.shape != miro.shape:
