@@ -13,7 +13,7 @@ Author: Generated from CellProfiler pipeline 231115_combined_pipeline_new_nomito
 Pipeline Version: v6
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -300,7 +300,7 @@ class ImageMeasurements:
     @staticmethod
     def measure_image_intensity(
         intensity_image: np.ndarray,
-        mask: Optional[np.ndarray] = None
+        mask: np.ndarray | None = None
     ) -> dict[str, float]:
         """
         Measure global intensity statistics for an entire image.

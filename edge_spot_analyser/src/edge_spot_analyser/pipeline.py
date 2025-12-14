@@ -23,7 +23,7 @@ import os
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -131,9 +131,9 @@ class Pipeline:
 
     def __init__(
         self,
-        nuclei_params: Optional[NucleiSegmentationParams] = None,
-        edge_spot_params: Optional[EdgeSpotParams] = None,
-        perinuclear_params: Optional[PerinuclearRegionParams] = None
+        nuclei_params: NucleiSegmentationParams | None = None,
+        edge_spot_params: EdgeSpotParams | None = None,
+        perinuclear_params: PerinuclearRegionParams | None = None
     ):
         """
         Initialize pipeline with parameters.
@@ -322,7 +322,7 @@ class Pipeline:
         self,
         input_dir: Path,
         output_dir: Path,
-        config: Optional[dict[str, dict[str, Any]]] = None,
+        config: dict[str, dict[str, Any]] | None = None,
         n_workers: int = 1
     ) -> None:
         """
@@ -408,16 +408,22 @@ def main():
         epilog="""
 Examples:
   # Process all dates with default parameters
-  python pipeline.py --input inputs/ --output results/
+  edge-spot-pipeline --input inputs/ --output results/
 
   # Process specific date
-  python pipeline.py --input inputs/ --output results/ --date 20231115
+  edge-spot-pipeline --input inputs/ --output results/ --date 20231115
 
   # Use custom parameter configuration
-  python pipeline.py --input inputs/ --output results/ --config params.json
+  edge-spot-pipeline --input inputs/ --output results/ --config params.json
+
+  # Skip aggregation (only run image processing)
+  edge-spot-pipeline --input inputs/ --output results/ --skip-aggregate
+
+  # Enable time-course mode for aggregation
+  edge-spot-pipeline --input inputs/ --output results/ --t-varies
 
   # Verbose logging
-  python pipeline.py --input inputs/ --output results/ --verbose
+  edge-spot-pipeline --input inputs/ --output results/ --verbose
         """
     )
 
@@ -460,6 +466,24 @@ Examples:
         help='Number of parallel workers (default: 1, use -1 for all CPUs)'
     )
 
+    parser.add_argument(
+        '--skip-aggregate',
+        action='store_true',
+        help='Skip aggregation step (only run image processing)'
+    )
+
+    parser.add_argument(
+        '--t-varies',
+        action='store_true',
+        help='Enable time-course mode for aggregation'
+    )
+
+    parser.add_argument(
+        '--plot',
+        action='store_true',
+        help='Generate plots during aggregation (requires matplotlib)'
+    )
+
     args = parser.parse_args()
 
     # Handle workers
@@ -494,6 +518,28 @@ Examples:
 
     elapsed_time = time.time() - start_time
     logger.info(f"Pipeline complete in {elapsed_time:.2f} seconds")
+
+    # Run aggregation unless skipped
+    if not args.skip_aggregate:
+        from edge_spot_analyser.aggregation import AggregationConfig, Aggregator
+
+        logger.info("Running aggregation...")
+        agg_config = AggregationConfig(t_varies=args.t_varies, plot=args.plot)
+        aggregator = Aggregator(agg_config)
+
+        output_path = Path(args.output)
+        if args.date:
+            # Single date
+            date_output = output_path / args.date
+            if date_output.exists():
+                aggregator.process_date(date_output)
+        else:
+            # All dates
+            for date_dir in output_path.iterdir():
+                if date_dir.is_dir():
+                    aggregator.process_date(date_dir)
+
+        logger.info("Aggregation complete")
 
 
 if __name__ == '__main__':

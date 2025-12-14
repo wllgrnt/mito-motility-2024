@@ -151,8 +151,8 @@ def validate_pipeline(cp_output_dir: Path, py_output_dir: Path, tolerance: float
     print(f"  Common images: {len(common_keys)} (CP has {len(cp_image_info)}, Python has {len(py_image)})\n")
 
     # Build mapping from CP ImageNumber to Python ImageNumber via image_key
-    cp_key_to_num = dict(zip(cp_image_info['_image_key'], cp_image_info['ImageNumber']))
-    py_key_to_num = dict(zip(py_image['_image_key'], py_image['ImageNumber']))
+    cp_key_to_num = dict(zip(cp_image_info['_image_key'], cp_image_info['ImageNumber'], strict=True))
+    py_key_to_num = dict(zip(py_image['_image_key'], py_image['ImageNumber'], strict=True))
     cp_to_py_image = {cp_key_to_num[k]: py_key_to_num[k] for k in common_keys}
 
     # Files to compare (skip Image.csv since CP version lacks filename columns)

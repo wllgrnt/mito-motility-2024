@@ -12,7 +12,6 @@ Pipeline Version: v6
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 from scipy import ndimage
@@ -82,7 +81,7 @@ class PerinuclearRegionParams:
 
 def segment_nuclei(
     hoechst_image: np.ndarray,
-    params: Optional[NucleiSegmentationParams] = None
+    params: NucleiSegmentationParams | None = None
 ) -> np.ndarray:
     """
     Segment nuclei from Hoechst channel using 3-class Otsu thresholding.
@@ -265,7 +264,7 @@ def _filter_objects_by_size(
 
 def create_perinuclear_regions(
     nuclei_labels: np.ndarray,
-    params: Optional[PerinuclearRegionParams] = None
+    params: PerinuclearRegionParams | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Create perinuclear regions by expanding nuclei.
@@ -412,7 +411,7 @@ def robust_background_threshold(
 
 def detect_edge_spots(
     masked_miro: np.ndarray,
-    params: Optional[EdgeSpotParams] = None
+    params: EdgeSpotParams | None = None
 ) -> np.ndarray:
     """
     Detect bright peripheral mitochondrial spots using Robust Background thresholding.
@@ -483,31 +482,6 @@ def detect_edge_spots(
     labels = measure.label(labels > 0)
 
     return labels
-
-
-def _fill_holes_in_labels(labels: np.ndarray) -> np.ndarray:
-    """
-    Fill holes in each labeled object.
-
-    Args:
-        labels: Labeled image
-
-    Returns:
-        Labeled image with holes filled in each object
-    """
-    filled = np.zeros_like(labels)
-
-    for region in measure.regionprops(labels):
-        # Extract this object's mask
-        mask = labels == region.label
-
-        # Fill holes
-        filled_mask = ndimage.binary_fill_holes(mask)
-
-        # Add back to result with original label
-        filled[filled_mask] = region.label
-
-    return filled
 
 
 def filter_edge_spots_by_edge_intensity(

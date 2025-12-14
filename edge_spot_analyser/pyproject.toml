@@ -20,12 +20,22 @@ dependencies = [
 yaml = [
     "pyyaml>=5.4.0",
 ]
+plot = [
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+]
 dev = [
     "ruff>=0.1.0",
+]
+all = [
+    "pyyaml>=5.4.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
 ]
 
 [project.scripts]
 edge-spot-pipeline = "edge_spot_analyser.pipeline:main"
+edge-spot-aggregate = "edge_spot_analyser.aggregation:main"
 edge-spot-validate = "edge_spot_analyser.validate_pipeline:main"
 
 [build-system]

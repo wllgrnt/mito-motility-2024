@@ -6,6 +6,10 @@ This package analyzes mitochondrial distribution around nuclei in microscopy ima
 
 __version__ = "1.0.0"
 
+from edge_spot_analyser.aggregation import (
+    AggregationConfig,
+    Aggregator,
+)
 from edge_spot_analyser.io_utils import (
     CSVExporter,
     FileDiscovery,
@@ -53,4 +57,7 @@ __all__ = [
     "CSVExporter",
     # Pipeline
     "Pipeline",
+    # Aggregation
+    "Aggregator",
+    "AggregationConfig",
 ]

@@ -15,7 +15,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -69,7 +69,7 @@ class FileDiscovery:
     @staticmethod
     def find_image_pairs(
         input_dir: Path,
-        date: Optional[str] = None
+        date: str | None = None
     ) -> list[ImagePair]:
         """
         Find all Hoechst/MIRO160mer image pairs in a directory.
@@ -173,7 +173,7 @@ class FileDiscovery:
         return pairs
 
     @staticmethod
-    def _parse_filename(filename: str) -> Optional[dict[str, str]]:
+    def _parse_filename(filename: str) -> dict[str, str] | None:
         """
         Parse filename to extract metadata.
 
@@ -277,7 +277,7 @@ class CSVExporter:
     def export_measurements(
         measurements_list: list[dict[str, pd.DataFrame]],
         output_dir: Path,
-        date: Optional[str] = None
+        date: str | None = None
     ) -> None:
         """
         Export measurements to CSV files matching CellProfiler format.
@@ -381,42 +381,53 @@ class CSVExporter:
         """
         Create All_measurements.csv combining Nuclei and edge_spots.
 
-        This matches CellProfiler's multi-level column structure.
+        Produces CellProfiler-compatible multi-level column structure:
+        - Level 0: Object type (Image, Nuclei, edge_spots)
+        - Level 1: Column name (FileName_Hoechst, Number_Object_Number, etc.)
 
         Args:
             combined: Dictionary of combined measurements
             output_path: Output directory
         """
-        if not combined['Nuclei'] or not combined['edge_spots']:
-            # Skip if either is missing
+        if not combined['Nuclei'] or not combined['Image']:
             return
 
         nuclei_df = pd.concat(combined['Nuclei'], ignore_index=True)
-        edge_spots_df = pd.concat(combined['edge_spots'], ignore_index=True)
+        image_df = pd.concat(combined['Image'], ignore_index=True)
 
-        # Group by ImageNumber
-        nuclei_grouped = nuclei_df.groupby('ImageNumber')
-        edge_spots_grouped = edge_spots_df.groupby('ImageNumber')
+        # Handle edge_spots (may be empty for some images)
+        if combined['edge_spots']:
+            edge_spots_df = pd.concat(combined['edge_spots'], ignore_index=True)
+        else:
+            edge_spots_df = pd.DataFrame()
 
-        all_measurements = []
+        # Build rows for each image with multi-level column structure
+        rows = []
+        for _, img_row in image_df.iterrows():
+            image_number = img_row['ImageNumber']
 
-        for image_number in nuclei_df['ImageNumber'].unique():
-            if image_number in edge_spots_grouped.groups:
-                nuclei_data = nuclei_grouped.get_group(image_number)
-                edge_spots_data = edge_spots_grouped.get_group(image_number)
+            # Count nuclei for this image
+            nuclei_count = len(nuclei_df[nuclei_df['ImageNumber'] == image_number])
 
-                # For simplicity, create a flattened structure
-                # (Full multi-index matching CellProfiler would be more complex)
-                combined_row = {
-                    'ImageNumber': image_number,
-                    'Nuclei_Count': len(nuclei_data),
-                    'edge_spots_Count': len(edge_spots_data),
-                }
+            # Count edge spots for this image
+            if not edge_spots_df.empty:
+                edge_spot_count = len(
+                    edge_spots_df[edge_spots_df['ImageNumber'] == image_number]
+                )
+            else:
+                edge_spot_count = 0
 
-                all_measurements.append(combined_row)
+            rows.append({
+                ('Image', 'ImageNumber'): image_number,
+                ('Image', 'FileName_Hoechst'): img_row.get('FileName_Hoechst', ''),
+                ('Image', 'FileName_MIRO160mer'): img_row.get('FileName_MIRO160mer', ''),
+                ('Nuclei', 'Number_Object_Number'): nuclei_count,
+                ('edge_spots', 'Number_Object_Number'): edge_spot_count,
+            })
 
-        if all_measurements:
-            all_df = pd.DataFrame(all_measurements)
+        if rows:
+            all_df = pd.DataFrame(rows)
+            all_df.columns = pd.MultiIndex.from_tuples(all_df.columns)
             output_file = output_path / "All_measurements.csv"
             all_df.to_csv(output_file, index=False)
             logger.info(f"Exported {len(all_df)} rows to {output_file}")
