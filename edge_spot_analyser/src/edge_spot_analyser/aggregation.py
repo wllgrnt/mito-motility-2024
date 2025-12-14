@@ -144,13 +144,22 @@ class Aggregator:
         if isinstance(output_df.columns, pd.MultiIndex):
             output_df.columns = output_df.columns.droplevel(1)
 
-        # Calculate edge spot fraction
-        output_df["edge_spot_fraction"] = (
-            output_df["edge_spot_count"] / output_df["nuclei_count"]
+        # Aggregate by grouping on (WellNumber, XY, [T]) and counting rows
+        # This is needed because CellProfiler's All_measurements.csv has one row per object
+        group_cols = ["WellNumber", "XY", "T"] if self.config.t_varies else ["WellNumber", "XY"]
+        aggregate_df = (
+            output_df.groupby(group_cols)
+            .agg({"nuclei_count": "count", "edge_spot_count": "count"})
+            .reset_index()
         )
 
-        logger.info(f"Extracted edge spot data, output shape {output_df.shape}")
-        return output_df
+        # Calculate edge spot fraction
+        aggregate_df["edge_spot_fraction"] = (
+            aggregate_df["edge_spot_count"] / aggregate_df["nuclei_count"]
+        )
+
+        logger.info(f"Extracted edge spot data, output shape {aggregate_df.shape}")
+        return aggregate_df
 
     def _generate_edge_spot_time_files(
         self, df: pd.DataFrame, output_dir: Path

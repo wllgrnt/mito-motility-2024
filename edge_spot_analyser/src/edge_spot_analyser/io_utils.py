@@ -435,38 +435,117 @@ class CSVExporter:
 
 def load_parameter_config(config_path: Path) -> dict[str, dict[str, Any]]:
     """
-    Load per-date parameter configuration from JSON or YAML file.
+    Load per-date parameter configuration from JSON, YAML, or CSV file.
 
-    Expected format:
+    Supported formats:
+
+    JSON/YAML:
     {
-        "default": {
-            "otsu_correction_factor": 0.45,
-            ...
-        },
-        "20231115": {
-            "otsu_correction_factor": 0.50,
-            ...
-        }
+        "default": {"otsu_correction_factor": 0.45, ...},
+        "20231115": {"otsu_correction_factor": 0.50, ...}
     }
 
+    CSV (simple table format):
+    date,otsu_correction_factor,diameter_min,...
+    default,0.45,30,...
+    241223,0.50,,...
+    241217,0.40,25,...
+
+    Empty cells in CSV inherit from 'default' row.
+
     Args:
-        config_path: Path to configuration file (JSON or YAML)
+        config_path: Path to configuration file (JSON, YAML, or CSV)
 
     Returns:
         Dictionary mapping date to parameter overrides
     """
-    import json
+    config_path = Path(config_path)
 
-    with open(config_path) as f:
-        if config_path.suffix == '.json':
-            config = json.load(f)
-        elif config_path.suffix in ['.yml', '.yaml']:
-            import yaml
-            config = yaml.safe_load(f)
-        else:
-            raise ValueError(f"Unsupported config format: {config_path.suffix}")
+    if config_path.suffix == '.csv':
+        return _load_csv_config(config_path)
+    elif config_path.suffix == '.json':
+        import json
+        with open(config_path) as f:
+            return json.load(f)
+    elif config_path.suffix in ['.yml', '.yaml']:
+        import yaml
+        with open(config_path) as f:
+            return yaml.safe_load(f)
+    else:
+        raise ValueError(f"Unsupported config format: {config_path.suffix}")
+
+
+def _load_csv_config(config_path: Path) -> dict[str, dict[str, Any]]:
+    """
+    Load parameter configuration from CSV file.
+
+    CSV format:
+    date,otsu_correction_factor,diameter_min,diameter_max,...
+    default,0.45,30,100,...
+    241223,0.50,,,...
+    241217,0.40,25,,...
+
+    Empty cells inherit from the 'default' row.
+    The 'date' column is required and used as the key.
+
+    Args:
+        config_path: Path to CSV file
+
+    Returns:
+        Dictionary mapping date to parameter overrides
+    """
+    import csv
+
+    config: dict[str, dict[str, Any]] = {}
+
+    with open(config_path, newline='') as f:
+        reader = csv.DictReader(f)
+
+        if 'date' not in reader.fieldnames:
+            raise ValueError("CSV config must have a 'date' column")
+
+        for row in reader:
+            date = row.pop('date').strip()
+            if not date:
+                continue
+
+            # Convert values to appropriate types
+            params: dict[str, Any] = {}
+            for key, value in row.items():
+                value = value.strip() if value else ''
+                if not value:
+                    continue  # Skip empty values (will inherit from default)
+
+                # Try to convert to appropriate type
+                params[key] = _parse_config_value(value)
+
+            config[date] = params
 
     return config
+
+
+def _parse_config_value(value: str) -> int | float | bool | str:
+    """Parse a config value string to appropriate Python type."""
+    # Try int
+    try:
+        return int(value)
+    except ValueError:
+        pass
+
+    # Try float
+    try:
+        return float(value)
+    except ValueError:
+        pass
+
+    # Try bool
+    if value.lower() in ('true', 'yes', '1'):
+        return True
+    if value.lower() in ('false', 'no', '0'):
+        return False
+
+    # Return as string
+    return value
 
 
 def get_parameters_for_date(
