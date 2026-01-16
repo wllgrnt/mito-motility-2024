@@ -435,7 +435,7 @@ class CSVExporter:
 
 def load_parameter_config(config_path: Path) -> dict[str, dict[str, Any]]:
     """
-    Load per-date parameter configuration from JSON, YAML, or CSV file.
+    Load per-date parameter configuration from JSON, YAML, CSV, or Excel file.
 
     Supported formats:
 
@@ -451,10 +451,13 @@ def load_parameter_config(config_path: Path) -> dict[str, dict[str, Any]]:
     241223,0.50,,...
     241217,0.40,25,...
 
-    Empty cells in CSV inherit from 'default' row.
+    Excel (.xlsx): Uses 'Otsu_params' sheet with columns:
+    - Date, Threshold correction factor, Smoothing scale, Lower bound, Upper bound, Exclusion
+
+    Empty cells in CSV/Excel inherit from 'default' row.
 
     Args:
-        config_path: Path to configuration file (JSON, YAML, or CSV)
+        config_path: Path to configuration file (JSON, YAML, CSV, or Excel)
 
     Returns:
         Dictionary mapping date to parameter overrides
@@ -463,6 +466,8 @@ def load_parameter_config(config_path: Path) -> dict[str, dict[str, Any]]:
 
     if config_path.suffix == '.csv':
         return _load_csv_config(config_path)
+    elif config_path.suffix == '.xlsx':
+        return _load_excel_config(config_path)
     elif config_path.suffix == '.json':
         import json
         with open(config_path) as f:
@@ -546,6 +551,158 @@ def _parse_config_value(value: str) -> int | float | bool | str:
 
     # Return as string
     return value
+
+
+def _load_excel_config(
+    config_path: Path,
+    sheet_name: str = 'Otsu_params'
+) -> dict[str, dict[str, Any]]:
+    """
+    Load parameter configuration from Excel file.
+
+    Expected sheet columns:
+    - Date: date identifier (e.g., 220709, 231120_1)
+    - Threshold correction factor: otsu_correction_factor
+    - Smoothing scale: threshold_smoothing_scale
+    - Lower bound: threshold_lower_bound
+    - Upper bound: threshold_upper_bound
+    - Exclusion: comma-separated well/xy exclusions (e.g., "E06,XY9 & D05,XY6")
+
+    Args:
+        config_path: Path to Excel file
+        sheet_name: Name of sheet containing parameters (default: 'Otsu_params')
+
+    Returns:
+        Dictionary mapping date to parameter overrides
+    """
+    df = pd.read_excel(config_path, sheet_name=sheet_name)
+
+    # Column mapping from Excel names to internal parameter names
+    column_map = {
+        'Date': 'date',
+        'Threshold correction factor': 'otsu_correction_factor',
+        'Smoothing scale': 'threshold_smoothing_scale',
+        'Lower bound': 'threshold_lower_bound',
+        'Upper bound': 'threshold_upper_bound',
+        'Exclusion': 'exclusions',
+    }
+
+    # Rename columns
+    df = df.rename(columns=column_map)
+
+    # Build config dictionary
+    config: dict[str, dict[str, Any]] = {}
+
+    for _, row in df.iterrows():
+        # Get date identifier
+        date = row.get('date')
+        if pd.isna(date) or str(date).strip() == '':
+            continue
+
+        # Convert date to string (handles numeric dates like 220709)
+        date = str(int(date) if isinstance(date, float) and date == int(date) else date).strip()
+
+        # Build params for this date
+        params: dict[str, Any] = {}
+
+        # Process each parameter column
+        for excel_col, param_name in column_map.items():
+            if param_name == 'date':
+                continue
+
+            value = row.get(param_name)
+
+            # Skip NaN/empty values
+            if pd.isna(value):
+                continue
+
+            # Handle exclusions specially
+            if param_name == 'exclusions':
+                exclusions = parse_exclusions(str(value))
+                if exclusions:
+                    params['exclusions'] = exclusions
+            else:
+                # Convert to appropriate type
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value:
+                        params[param_name] = _parse_config_value(value)
+                else:
+                    params[param_name] = value
+
+        config[date] = params
+
+    logger.info(f"Loaded {len(config)} date configurations from {config_path}")
+    return config
+
+
+def parse_exclusions(exclusion_str: str) -> set[tuple[str, int]]:
+    """
+    Parse exclusion string into set of (well, xy) tuples.
+
+    Handles formats like:
+    - "E06,XY9 & D05, XY6 & C04, XY4"
+    - "F04, XY1"
+    - "B06, XY1 & B07,XY1 & B07, XY3"
+
+    Args:
+        exclusion_str: String containing exclusions separated by '&'
+
+    Returns:
+        Set of (well, xy) tuples, e.g., {('E06', 9), ('D05', 6)}
+    """
+    if not exclusion_str or exclusion_str.strip() == '' or exclusion_str == 'nan':
+        return set()
+
+    exclusions: set[tuple[str, int]] = set()
+
+    # Split by '&' separator
+    parts = exclusion_str.split('&')
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        # Parse "Well, XY#" or "Well,XY#" format
+        # Examples: "E06,XY9", "D05, XY6", "B07, XY3"
+        match = re.match(r'([A-Z]\d+)\s*,\s*XY\s*(\d+)', part, re.IGNORECASE)
+        if match:
+            well = match.group(1).upper()
+            xy = int(match.group(2))
+            exclusions.add((well, xy))
+        else:
+            logger.warning(f"Could not parse exclusion: '{part}'")
+
+    return exclusions
+
+
+def should_exclude_image(
+    image_pair: ImagePair,
+    exclusions: set[tuple[str, int]]
+) -> bool:
+    """
+    Check if an image pair should be excluded based on well/xy.
+
+    Args:
+        image_pair: ImagePair to check
+        exclusions: Set of (well, xy) tuples to exclude
+
+    Returns:
+        True if image should be excluded, False otherwise
+    """
+    if not exclusions:
+        return False
+
+    # Extract well and xy from image pair
+    well = image_pair.well_number
+    try:
+        # xy_position is like "XY9", extract the number
+        xy = int(image_pair.xy_position.replace('XY', ''))
+    except (ValueError, AttributeError):
+        return False
+
+    return (well, xy) in exclusions
 
 
 def get_parameters_for_date(

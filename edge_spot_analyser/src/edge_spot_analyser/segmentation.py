@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy import ndimage
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, median_filter
 from skimage import filters, measure, morphology, segmentation
 from skimage.feature import peak_local_max
 from skimage.filters import threshold_multiotsu
@@ -31,9 +31,10 @@ class NucleiSegmentationParams:
     threshold_lower_bound: float = 0.00195  # Absolute minimum threshold
     threshold_upper_bound: float = 0.01  # Absolute maximum threshold
     min_distance: int = 30  # Minimum distance between nuclei for declumping
-    threshold_smoothing_scale: float = 2.0  # CP "Threshold smoothing scale" - smoothing before threshold
+    threshold_smoothing_scale: float = 2.0  # CP "Threshold smoothing scale" - Gaussian smoothing before threshold
     declump_smoothing_filter: int = 10  # CP "Size of smoothing filter" - for declumping
     discard_border_objects: bool = True  # Remove objects touching image border
+    median_filter_diameter: int = 3  # Median filter diameter applied before Gaussian (0 to disable)
 
     @property
     def size_min(self) -> int:
@@ -89,7 +90,8 @@ def segment_nuclei(
     Implements CellProfiler Module 7 (IdentifyPrimaryObjects → Nuclei).
 
     Algorithm:
-    1. Apply Gaussian smoothing to image (σ=10 pixels)
+    0. Apply median filter (diameter=3) for noise reduction (if enabled)
+    1. Apply Gaussian smoothing to image (σ = threshold_smoothing_scale/2)
     2. Calculate 3-class Otsu threshold (uses upper threshold)
     3. Apply correction factor (default 0.45) and clip to bounds
     4. Create binary mask
@@ -110,10 +112,19 @@ def segment_nuclei(
     if params is None:
         params = NucleiSegmentationParams()
 
+    # Step 0: Apply median filter for noise reduction (before Gaussian smoothing)
+    if params.median_filter_diameter > 0:
+        # Create disk-shaped footprint matching CellProfiler's diameter
+        # diameter=3 -> radius=1 -> footprint is 3x3 disk
+        footprint = morphology.disk(params.median_filter_diameter // 2)
+        smoothed = median_filter(hoechst_image, footprint=footprint)
+    else:
+        smoothed = hoechst_image
+
     # Step 1: Apply Gaussian smoothing to image before thresholding
     # CP "Threshold smoothing scale" of 2.0 → sigma = 1.0 (scale/2)
     sigma = params.threshold_smoothing_scale / 2.0
-    smoothed = gaussian_filter(hoechst_image, sigma=sigma)
+    smoothed = gaussian_filter(smoothed, sigma=sigma)
 
     # Step 2: Calculate 3-class Otsu thresholds
     # This returns 2 thresholds dividing into 3 classes: [background, intermediate, foreground]

@@ -34,6 +34,7 @@ from edge_spot_analyser.io_utils import (
     ImagePair,
     get_parameters_for_date,
     load_parameter_config,
+    should_exclude_image,
 )
 from edge_spot_analyser.measurements import combine_measurements_for_export
 from edge_spot_analyser.segmentation import (
@@ -146,6 +147,7 @@ class Pipeline:
         self.nuclei_params = nuclei_params or NucleiSegmentationParams()
         self.edge_spot_params = edge_spot_params or EdgeSpotParams()
         self.perinuclear_params = perinuclear_params or PerinuclearRegionParams()
+        self._current_exclusions: set[tuple[str, int]] = set()  # (well, xy) pairs to exclude
 
     def process_image_pair(
         self,
@@ -276,6 +278,17 @@ class Pipeline:
 
         logger.info(f"Found {len(image_pairs)} image pairs")
 
+        # Filter out excluded images
+        if self._current_exclusions:
+            original_count = len(image_pairs)
+            image_pairs = [
+                ip for ip in image_pairs
+                if not should_exclude_image(ip, self._current_exclusions)
+            ]
+            excluded_count = original_count - len(image_pairs)
+            if excluded_count > 0:
+                logger.info(f"Excluded {excluded_count} images based on config: {self._current_exclusions}")
+
         # Prepare args for parallel processing
         args_list = [
             (pair, i, self.nuclei_params, self.edge_spot_params, self.perinuclear_params)
@@ -378,6 +391,14 @@ class Pipeline:
             self.nuclei_params.diameter_max = params['diameter_max']
         if 'min_distance' in params:
             self.nuclei_params.min_distance = params['min_distance']
+        if 'threshold_smoothing_scale' in params:
+            self.nuclei_params.threshold_smoothing_scale = params['threshold_smoothing_scale']
+        if 'threshold_lower_bound' in params:
+            self.nuclei_params.threshold_lower_bound = params['threshold_lower_bound']
+        if 'threshold_upper_bound' in params:
+            self.nuclei_params.threshold_upper_bound = params['threshold_upper_bound']
+        if 'median_filter_diameter' in params:
+            self.nuclei_params.median_filter_diameter = params['median_filter_diameter']
 
         # Update edge spot params
         if 'edge_spot_diameter_min' in params:
@@ -392,6 +413,9 @@ class Pipeline:
             self.perinuclear_params.inner_expansion = params['inner_expansion']
         if 'outer_expansion' in params:
             self.perinuclear_params.outer_expansion = params['outer_expansion']
+
+        # Update exclusions for current date
+        self._current_exclusions = params.get('exclusions', set())
 
 
 def main():
@@ -510,7 +534,11 @@ Examples:
     start_time = time.time()
 
     if args.date:
-        # Process single date
+        # Process single date - apply config if provided
+        if config:
+            date_params = get_parameters_for_date(config, args.date)
+            pipeline._update_parameters(date_params)
+            logger.info(f"Using parameters for date {args.date}: {date_params}")
         pipeline.process_date_batch(args.input, args.output, args.date, n_workers=n_workers)
     else:
         # Process all dates
