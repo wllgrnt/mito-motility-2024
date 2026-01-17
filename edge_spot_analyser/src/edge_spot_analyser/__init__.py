@@ -10,6 +10,7 @@ from edge_spot_analyser.aggregation import (
     AggregationConfig,
     Aggregator,
 )
+from edge_spot_analyser.figure_aggregation import FigureAggregator
 from edge_spot_analyser.io_utils import (
     CSVExporter,
     FileDiscovery,
@@ -68,4 +69,5 @@ __all__ = [
     # Aggregation
     "Aggregator",
     "AggregationConfig",
+    "FigureAggregator",
 ]

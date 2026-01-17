@@ -37,6 +37,7 @@ all = [
 [project.scripts]
 edge-spot-pipeline = "edge_spot_analyser.pipeline:main"
 edge-spot-aggregate = "edge_spot_analyser.aggregation:main"
+edge-spot-figure-aggregate = "edge_spot_analyser.figure_aggregation:main"
 edge-spot-validate = "edge_spot_analyser.validate_pipeline:main"
 
 [build-system]
