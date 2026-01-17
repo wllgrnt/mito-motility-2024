@@ -32,16 +32,20 @@ from edge_spot_analyser.segmentation import (
     EdgeSpotParams,
     NucleiSegmentationParams,
     PerinuclearRegionParams,
+    SmoothParams,
     create_perinuclear_regions,
     detect_edge_spots,
     filter_edge_spots_by_edge_intensity,
     mask_peripheral_regions,
     segment_nuclei,
+    smooth_image,
 )
 
 __all__ = [
     "__version__",
     # Segmentation
+    "SmoothParams",
+    "smooth_image",
     "NucleiSegmentationParams",
     "EdgeSpotParams",
     "PerinuclearRegionParams",

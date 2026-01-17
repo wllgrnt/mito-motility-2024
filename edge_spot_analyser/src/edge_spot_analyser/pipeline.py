@@ -41,11 +41,13 @@ from edge_spot_analyser.segmentation import (
     EdgeSpotParams,
     NucleiSegmentationParams,
     PerinuclearRegionParams,
+    SmoothParams,
     create_perinuclear_regions,
     detect_edge_spots,
     filter_edge_spots_by_edge_intensity,
     mask_peripheral_regions,
     segment_nuclei,
+    smooth_image,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,16 +58,20 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
     Process a single image pair. Module-level function for multiprocessing.
 
     Args:
-        args: Tuple of (image_pair, image_number, nuclei_params, edge_spot_params, perinuclear_params)
+        args: Tuple of (image_pair, image_number, smooth_params, nuclei_params, edge_spot_params, perinuclear_params)
 
     Returns:
         Dictionary with 'image_id', 'measurements' or 'error'
     """
-    image_pair, image_number, nuclei_params, edge_spot_params, perinuclear_params = args
+    image_pair, image_number, smooth_params, nuclei_params, edge_spot_params, perinuclear_params = args
 
     try:
         # Load images
         hoechst, miro = ImageLoader.load_image_pair(image_pair)
+
+        # Apply smoothing (CellProfiler Smooth module) before segmentation
+        if smooth_params is not None:
+            hoechst = smooth_image(hoechst, smooth_params)
 
         # Segment nuclei
         nuclei_labels = segment_nuclei(hoechst, nuclei_params)
@@ -132,6 +138,7 @@ class Pipeline:
 
     def __init__(
         self,
+        smooth_params: SmoothParams | None = None,
         nuclei_params: NucleiSegmentationParams | None = None,
         edge_spot_params: EdgeSpotParams | None = None,
         perinuclear_params: PerinuclearRegionParams | None = None
@@ -140,10 +147,12 @@ class Pipeline:
         Initialize pipeline with parameters.
 
         Args:
+            smooth_params: Image smoothing parameters (None to disable smoothing)
             nuclei_params: Nuclei segmentation parameters (uses defaults if None)
             edge_spot_params: Edge spot detection parameters (uses defaults if None)
             perinuclear_params: Perinuclear region parameters (uses defaults if None)
         """
+        self.smooth_params = smooth_params if smooth_params is not None else SmoothParams()
         self.nuclei_params = nuclei_params or NucleiSegmentationParams()
         self.edge_spot_params = edge_spot_params or EdgeSpotParams()
         self.perinuclear_params = perinuclear_params or PerinuclearRegionParams()
@@ -291,7 +300,7 @@ class Pipeline:
 
         # Prepare args for parallel processing
         args_list = [
-            (pair, i, self.nuclei_params, self.edge_spot_params, self.perinuclear_params)
+            (pair, i, self.smooth_params, self.nuclei_params, self.edge_spot_params, self.perinuclear_params)
             for i, pair in enumerate(image_pairs, start=1)
         ]
 
@@ -397,8 +406,16 @@ class Pipeline:
             self.nuclei_params.threshold_lower_bound = params['threshold_lower_bound']
         if 'threshold_upper_bound' in params:
             self.nuclei_params.threshold_upper_bound = params['threshold_upper_bound']
-        if 'median_filter_diameter' in params:
-            self.nuclei_params.median_filter_diameter = params['median_filter_diameter']
+
+        # Update smooth params (CellProfiler Smooth module)
+        if 'smooth_artifact_diameter' in params:
+            if self.smooth_params is None:
+                self.smooth_params = SmoothParams()
+            self.smooth_params.artifact_diameter = params['smooth_artifact_diameter']
+        if 'smooth_method' in params:
+            if self.smooth_params is None:
+                self.smooth_params = SmoothParams()
+            self.smooth_params.method = params['smooth_method']
 
         # Update edge spot params
         if 'edge_spot_diameter_min' in params:

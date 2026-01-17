@@ -606,7 +606,7 @@ def _load_excel_config(
         params: dict[str, Any] = {}
 
         # Process each parameter column
-        for excel_col, param_name in column_map.items():
+        for _excel_col, param_name in column_map.items():
             if param_name == 'date':
                 continue
 

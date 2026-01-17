@@ -2,6 +2,7 @@
 Segmentation module for the CellProfiler pipeline port.
 
 This module implements the core segmentation steps from the CellProfiler pipeline:
+- Smooth module: Image smoothing/noise reduction (median filter)
 - Module 7: Nuclei segmentation using 3-class Otsu thresholding
 - Module 8-10, 14: Perinuclear region creation
 - Module 11: Edge spot detection using Robust Background thresholding
@@ -22,6 +23,52 @@ from skimage.filters import threshold_multiotsu
 
 
 @dataclass
+class SmoothParams:
+    """Parameters for image smoothing (CellProfiler Smooth module)."""
+
+    method: str = "median"  # Smoothing method: "median" or "gaussian"
+    artifact_diameter: int = 3  # Size of artifacts to remove (for median filter)
+    sigma: float = 1.0  # Sigma for Gaussian smoothing (if method="gaussian")
+
+
+def smooth_image(
+    image: np.ndarray,
+    params: SmoothParams | None = None
+) -> np.ndarray:
+    """
+    Apply smoothing to an image for noise reduction.
+
+    Implements CellProfiler's Smooth module with median filter option.
+    This is a preprocessing step applied BEFORE segmentation.
+
+    Args:
+        image: 2D float array (0-1 normalized)
+        params: Smoothing parameters (uses defaults if None)
+
+    Returns:
+        Smoothed image
+
+    References:
+        CellProfiler Smooth module with "Median Filter" method
+    """
+    if params is None:
+        params = SmoothParams()
+
+    if params.method == "median":
+        if params.artifact_diameter <= 0:
+            return image
+        # CellProfiler uses a disk-shaped structuring element
+        # artifact_diameter is the diameter, so radius = diameter // 2
+        radius = max(1, params.artifact_diameter // 2)
+        footprint = morphology.disk(radius)
+        return median_filter(image, footprint=footprint)
+    elif params.method == "gaussian":
+        return gaussian_filter(image, sigma=params.sigma)
+    else:
+        raise ValueError(f"Unknown smoothing method: {params.method}")
+
+
+@dataclass
 class NucleiSegmentationParams:
     """Parameters for nuclei segmentation (Module 7)."""
 
@@ -34,7 +81,6 @@ class NucleiSegmentationParams:
     threshold_smoothing_scale: float = 2.0  # CP "Threshold smoothing scale" - Gaussian smoothing before threshold
     declump_smoothing_filter: int = 10  # CP "Size of smoothing filter" - for declumping
     discard_border_objects: bool = True  # Remove objects touching image border
-    median_filter_diameter: int = 3  # Median filter diameter applied before Gaussian (0 to disable)
 
     @property
     def size_min(self) -> int:
@@ -89,8 +135,10 @@ def segment_nuclei(
 
     Implements CellProfiler Module 7 (IdentifyPrimaryObjects → Nuclei).
 
+    Note: For noise reduction, apply smooth_image() to the Hoechst image
+    BEFORE calling this function (matching CellProfiler's Smooth module).
+
     Algorithm:
-    0. Apply median filter (diameter=3) for noise reduction (if enabled)
     1. Apply Gaussian smoothing to image (σ = threshold_smoothing_scale/2)
     2. Calculate 3-class Otsu threshold (uses upper threshold)
     3. Apply correction factor (default 0.45) and clip to bounds
@@ -112,16 +160,10 @@ def segment_nuclei(
     if params is None:
         params = NucleiSegmentationParams()
 
-    # Step 0: Apply median filter for noise reduction (before Gaussian smoothing)
-    if params.median_filter_diameter > 0:
-        # Create disk-shaped footprint matching CellProfiler's diameter
-        # diameter=3 -> radius=1 -> footprint is 3x3 disk
-        footprint = morphology.disk(params.median_filter_diameter // 2)
-        smoothed = median_filter(hoechst_image, footprint=footprint)
-    else:
-        smoothed = hoechst_image
-
     # Step 1: Apply Gaussian smoothing to image before thresholding
+    # Note: Median filter preprocessing (CellProfiler Smooth module) should be
+    # applied BEFORE calling this function using smooth_image()
+    smoothed = hoechst_image
     # CP "Threshold smoothing scale" of 2.0 → sigma = 1.0 (scale/2)
     sigma = params.threshold_smoothing_scale / 2.0
     smoothed = gaussian_filter(smoothed, sigma=sigma)
@@ -129,12 +171,16 @@ def segment_nuclei(
     # Step 2: Calculate 3-class Otsu thresholds
     # This returns 2 thresholds dividing into 3 classes: [background, intermediate, foreground]
     # We use the upper threshold (between intermediate and foreground)
+    # Note: Clip outliers before Otsu to prevent bright artifacts from skewing threshold
+    # (matches CellProfiler behavior)
+    p999 = np.percentile(smoothed, 99.9)
+    smoothed_clipped = np.clip(smoothed, 0, p999)
     try:
-        thresholds = threshold_multiotsu(smoothed, classes=3)
+        thresholds = threshold_multiotsu(smoothed_clipped, classes=3)
         threshold = thresholds[1]  # Upper threshold
     except ValueError:
         # Fallback if image has insufficient dynamic range
-        threshold = filters.threshold_otsu(smoothed)
+        threshold = filters.threshold_otsu(smoothed_clipped)
 
     # Step 3: Apply correction factor and clip to bounds
     threshold *= params.otsu_correction_factor
@@ -145,10 +191,13 @@ def segment_nuclei(
 
     # Step 5: Declump using intensity-based watershed
     # Note: Fill holes AFTER declumping (CellProfiler: "After declumping only")
+    # CellProfiler auto smoothing: sigma = min_diameter / 2.35 / 2
+    declump_smoothing_sigma = params.diameter_min / 4.7
     labels = _declump_objects_watershed(
         binary,
         intensity_image=hoechst_image,
-        min_distance=params.min_distance
+        min_distance=params.min_distance,
+        smoothing_sigma=declump_smoothing_sigma
     )
 
     # Step 6: Fill holes in each labeled object (after declumping)
@@ -170,7 +219,8 @@ def segment_nuclei(
 def _declump_objects_watershed(
     binary_mask: np.ndarray,
     intensity_image: np.ndarray,
-    min_distance: int
+    min_distance: int,
+    smoothing_sigma: float | None = None
 ) -> np.ndarray:
     """
     Declump touching objects using intensity-based watershed.
@@ -179,6 +229,8 @@ def _declump_objects_watershed(
         binary_mask: Binary mask of objects
         intensity_image: Original intensity image for watershed
         min_distance: Minimum distance between object centers
+        smoothing_sigma: Gaussian smoothing sigma for intensity image before watershed.
+            If None, no smoothing is applied.
 
     Returns:
         Labeled image with separated objects
@@ -204,10 +256,16 @@ def _declump_objects_watershed(
     for i, coord in enumerate(coords_array, start=1):
         markers[tuple(coord)] = i
 
+    # Smooth intensity image before watershed (CellProfiler "Size of smoothing filter")
+    if smoothing_sigma is not None and smoothing_sigma > 0:
+        intensity_for_watershed = gaussian_filter(intensity_image, sigma=smoothing_sigma)
+    else:
+        intensity_for_watershed = intensity_image
+
     # Watershed using inverted intensity (watershed finds minima)
     # CellProfiler uses "intensity-based" watershed, meaning watershed on inverted intensity
     labels = segmentation.watershed(
-        -intensity_image,
+        -intensity_for_watershed,
         markers,
         mask=binary_mask
     )
