@@ -15,11 +15,11 @@ Pipeline Version: v6
 from dataclasses import dataclass
 
 import numpy as np
+from centrosome.otsu import otsu3
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter, median_filter
 from skimage import filters, measure, morphology, segmentation
 from skimage.feature import peak_local_max
-from skimage.filters import threshold_multiotsu
 
 
 @dataclass
@@ -168,19 +168,15 @@ def segment_nuclei(
     sigma = params.threshold_smoothing_scale / 2.0
     smoothed = gaussian_filter(smoothed, sigma=sigma)
 
-    # Step 2: Calculate 3-class Otsu thresholds
-    # This returns 2 thresholds dividing into 3 classes: [background, intermediate, foreground]
-    # We use the upper threshold (between intermediate and foreground)
-    # Note: Clip outliers before Otsu to prevent bright artifacts from skewing threshold
-    # (matches CellProfiler behavior)
-    p999 = np.percentile(smoothed, 99.9)
-    smoothed_clipped = np.clip(smoothed, 0, p999)
+    # Step 2: Calculate 3-class Otsu thresholds using CellProfiler's centrosome library
+    # This returns (lower_threshold, upper_threshold) dividing into 3 classes
+    # We use the upper threshold (middle class → background, as per CellProfiler settings)
     try:
-        thresholds = threshold_multiotsu(smoothed_clipped, classes=3)
-        threshold = thresholds[1]  # Upper threshold
-    except ValueError:
+        lower_thresh, upper_thresh = otsu3(smoothed.ravel())
+        threshold = upper_thresh
+    except (ValueError, IndexError):
         # Fallback if image has insufficient dynamic range
-        threshold = filters.threshold_otsu(smoothed_clipped)
+        threshold = filters.threshold_otsu(smoothed)
 
     # Step 3: Apply correction factor and clip to bounds
     threshold *= params.otsu_correction_factor
