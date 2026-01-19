@@ -34,10 +34,7 @@ class SmoothParams:
     sigma: float = 1.0  # Sigma for Gaussian smoothing (if method="gaussian")
 
 
-def smooth_image(
-    image: np.ndarray,
-    params: SmoothParams | None = None
-) -> np.ndarray:
+def smooth_image(image: np.ndarray, params: SmoothParams | None = None) -> np.ndarray:
     """
     Apply smoothing to an image for noise reduction.
 
@@ -81,7 +78,9 @@ class NucleiSegmentationParams:
     threshold_lower_bound: float = 0.00195  # Absolute minimum threshold
     threshold_upper_bound: float = 0.01  # Absolute maximum threshold
     min_distance: int = 30  # Minimum distance between nuclei for declumping
-    threshold_smoothing_scale: float = 2.0  # CP "Threshold smoothing scale" - Gaussian smoothing before threshold
+    threshold_smoothing_scale: float = (
+        2.0  # CP "Threshold smoothing scale" - Gaussian smoothing before threshold
+    )
     declump_smoothing_filter: int = 10  # CP "Size of smoothing filter" - for declumping
     discard_border_objects: bool = True  # Remove objects touching image border
 
@@ -130,8 +129,7 @@ class PerinuclearRegionParams:
 
 
 def segment_nuclei(
-    hoechst_image: np.ndarray,
-    params: NucleiSegmentationParams | None = None
+    hoechst_image: np.ndarray, params: NucleiSegmentationParams | None = None
 ) -> np.ndarray:
     """
     Segment nuclei from Hoechst channel using 3-class Otsu thresholding.
@@ -181,9 +179,7 @@ def segment_nuclei(
         threshold = upper_thresh
     except (ValueError, IndexError):
         # Fallback if image has insufficient dynamic range
-        logger.warning(
-            "3-class Otsu failed (low dynamic range), falling back to 2-class Otsu"
-        )
+        logger.warning("3-class Otsu failed (low dynamic range), falling back to 2-class Otsu")
         threshold = filters.threshold_otsu(smoothed)
 
     # Step 3: Apply correction factor and clip to bounds
@@ -201,7 +197,7 @@ def segment_nuclei(
         binary,
         intensity_image=hoechst_image,
         min_distance=params.min_distance,
-        smoothing_sigma=declump_smoothing_sigma
+        smoothing_sigma=declump_smoothing_sigma,
     )
 
     # Step 6: Fill holes in each labeled object (after declumping)
@@ -224,7 +220,7 @@ def _declump_objects_watershed(
     binary_mask: np.ndarray,
     intensity_image: np.ndarray,
     min_distance: int,
-    smoothing_sigma: float | None = None
+    smoothing_sigma: float | None = None,
 ) -> np.ndarray:
     """
     Declump touching objects using intensity-based watershed.
@@ -249,11 +245,7 @@ def _declump_objects_watershed(
 
     # Apply minimum distance constraint
     # Dilate each maximum by min_distance and keep only non-overlapping ones
-    coords_array = peak_local_max(
-        distance,
-        min_distance=min_distance,
-        labels=binary_mask
-    )
+    coords_array = peak_local_max(distance, min_distance=min_distance, labels=binary_mask)
 
     # Create markers from peaks
     markers = np.zeros(binary_mask.shape, dtype=int)
@@ -268,11 +260,7 @@ def _declump_objects_watershed(
 
     # Watershed using inverted intensity (watershed finds minima)
     # CellProfiler uses "intensity-based" watershed, meaning watershed on inverted intensity
-    labels = segmentation.watershed(
-        -intensity_for_watershed,
-        markers,
-        mask=binary_mask
-    )
+    labels = segmentation.watershed(-intensity_for_watershed, markers, mask=binary_mask)
 
     return labels
 
@@ -302,11 +290,7 @@ def _fill_holes_in_labels(labels: np.ndarray) -> np.ndarray:
     return output
 
 
-def _filter_objects_by_size(
-    labels: np.ndarray,
-    size_min: int,
-    size_max: int
-) -> np.ndarray:
+def _filter_objects_by_size(labels: np.ndarray, size_min: int, size_max: int) -> np.ndarray:
     """
     Filter labeled objects by area.
 
@@ -322,10 +306,7 @@ def _filter_objects_by_size(
     props = measure.regionprops(labels)
 
     # Create mask of objects to keep
-    keep_labels = [
-        prop.label for prop in props
-        if size_min <= prop.area <= size_max
-    ]
+    keep_labels = [prop.label for prop in props if size_min <= prop.area <= size_max]
 
     # Create filtered image
     filtered = np.zeros_like(labels)
@@ -336,8 +317,7 @@ def _filter_objects_by_size(
 
 
 def create_perinuclear_regions(
-    nuclei_labels: np.ndarray,
-    params: PerinuclearRegionParams | None = None
+    nuclei_labels: np.ndarray, params: PerinuclearRegionParams | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Create perinuclear regions by expanding nuclei.
@@ -364,16 +344,10 @@ def create_perinuclear_regions(
         params = PerinuclearRegionParams()
 
     # Module 8: Expand by 10 pixels
-    expand_nuclei_10px = morphology.dilation(
-        nuclei_labels,
-        morphology.disk(params.inner_expansion)
-    )
+    expand_nuclei_10px = morphology.dilation(nuclei_labels, morphology.disk(params.inner_expansion))
 
     # Module 9: Expand by 15 pixels (for masking peripheral regions)
-    expand_nuclei_15px = morphology.dilation(
-        nuclei_labels,
-        morphology.disk(params.outer_expansion)
-    )
+    expand_nuclei_15px = morphology.dilation(nuclei_labels, morphology.disk(params.outer_expansion))
 
     # Module 14: Create tertiary object (perinuclear ring)
     # CellProfiler IdentifyTertiaryObjects with:
@@ -385,16 +359,13 @@ def create_perinuclear_regions(
     perinuclear_ring = np.where(
         (expand_nuclei_10px > 0) & (eroded_nuclei == 0),
         expand_nuclei_10px,  # Keep the nucleus label from expansion
-        0
+        0,
     )
 
     return expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring
 
 
-def mask_peripheral_regions(
-    miro_image: np.ndarray,
-    expand_nuclei_15px: np.ndarray
-) -> np.ndarray:
+def mask_peripheral_regions(miro_image: np.ndarray, expand_nuclei_15px: np.ndarray) -> np.ndarray:
     """
     Mask out perinuclear regions from MIRO160mer image.
 
@@ -425,7 +396,7 @@ def robust_background_threshold(
     num_deviations: float = 6.0,
     correction_factor: float = 2.0,
     lower_bound: float = 0.0035,
-    upper_bound: float = 1.0
+    upper_bound: float = 1.0,
 ) -> float:
     """
     Calculate threshold using CellProfiler's Robust Background algorithm.
@@ -490,10 +461,7 @@ def robust_background_threshold(
     return threshold
 
 
-def detect_edge_spots(
-    masked_miro: np.ndarray,
-    params: EdgeSpotParams | None = None
-) -> np.ndarray:
+def detect_edge_spots(masked_miro: np.ndarray, params: EdgeSpotParams | None = None) -> np.ndarray:
     """
     Detect bright peripheral mitochondrial spots using Robust Background thresholding.
 
@@ -531,7 +499,7 @@ def detect_edge_spots(
         num_deviations=params.num_deviations,
         correction_factor=params.correction_factor,
         lower_bound=params.threshold_lower_bound,
-        upper_bound=1.0
+        upper_bound=1.0,
     )
 
     # Step 2: Create binary mask
@@ -569,7 +537,7 @@ def filter_edge_spots_by_edge_intensity(
     edge_spots_labels: np.ndarray,
     miro_image: np.ndarray,
     min_edge_intensity: float = 0.0,
-    max_edge_intensity: float = 1.0
+    max_edge_intensity: float = 1.0,
 ) -> np.ndarray:
     """
     Filter edge spots by their edge intensity.

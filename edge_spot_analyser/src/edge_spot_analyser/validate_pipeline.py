@@ -20,7 +20,8 @@ def extract_image_key(filename: str) -> str:
     # Extract Well, Seq, XY from filename like:
     # "WellB02_Channel405,561,488,640_Seq0000-MaxIP_XY1_405.tif"
     import re
-    match = re.search(r'Well([A-Z]\d+).*Seq(\d+).*XY(\d+)', filename)
+
+    match = re.search(r"Well([A-Z]\d+).*Seq(\d+).*XY(\d+)", filename)
     if match:
         return f"{match.group(1)}_{match.group(2)}_{match.group(3)}"
     return filename
@@ -31,7 +32,7 @@ def compare_dataframes(
     py_df: pd.DataFrame,
     name: str,
     tolerance: float = 0.05,
-    join_on_image: bool = False
+    join_on_image: bool = False,
 ) -> dict:
     """
     Compare two DataFrames for numerical agreement.
@@ -46,40 +47,47 @@ def compare_dataframes(
     Returns:
         Dictionary with comparison results
     """
-    results = {
-        'name': name,
-        'cp_rows': len(cp_df),
-        'py_rows': len(py_df),
-        'discrepancies': []
-    }
+    results = {"name": name, "cp_rows": len(cp_df), "py_rows": len(py_df), "discrepancies": []}
 
     # If joining on image, filter to common images
-    if join_on_image and 'FileName_Hoechst' in cp_df.columns and 'FileName_Hoechst' in py_df.columns:
+    if (
+        join_on_image
+        and "FileName_Hoechst" in cp_df.columns
+        and "FileName_Hoechst" in py_df.columns
+    ):
         # Create image keys for matching
         cp_df = cp_df.copy()
         py_df = py_df.copy()
-        cp_df['_image_key'] = cp_df['FileName_Hoechst'].apply(extract_image_key)
-        py_df['_image_key'] = py_df['FileName_Hoechst'].apply(extract_image_key)
+        cp_df["_image_key"] = cp_df["FileName_Hoechst"].apply(extract_image_key)
+        py_df["_image_key"] = py_df["FileName_Hoechst"].apply(extract_image_key)
 
         # Find common images
-        common_keys = set(cp_df['_image_key']) & set(py_df['_image_key'])
-        results['common_images'] = len(common_keys)
+        common_keys = set(cp_df["_image_key"]) & set(py_df["_image_key"])
+        results["common_images"] = len(common_keys)
 
         if len(common_keys) == 0:
-            results['discrepancies'].append("No common images found between datasets")
+            results["discrepancies"].append("No common images found between datasets")
             return results
 
         # Filter to common images
-        cp_df = cp_df[cp_df['_image_key'].isin(common_keys)].sort_values('_image_key').reset_index(drop=True)
-        py_df = py_df[py_df['_image_key'].isin(common_keys)].sort_values('_image_key').reset_index(drop=True)
+        cp_df = (
+            cp_df[cp_df["_image_key"].isin(common_keys)]
+            .sort_values("_image_key")
+            .reset_index(drop=True)
+        )
+        py_df = (
+            py_df[py_df["_image_key"].isin(common_keys)]
+            .sort_values("_image_key")
+            .reset_index(drop=True)
+        )
 
-        results['matched_rows'] = len(cp_df)
+        results["matched_rows"] = len(cp_df)
 
-    results['row_count_match'] = len(cp_df) == len(py_df)
+    results["row_count_match"] = len(cp_df) == len(py_df)
 
     # Check row counts
-    if not results['row_count_match']:
-        results['discrepancies'].append(
+    if not results["row_count_match"]:
+        results["discrepancies"].append(
             f"Row count mismatch after filtering: CP={len(cp_df)}, Python={len(py_df)}"
         )
         return results
@@ -87,13 +95,14 @@ def compare_dataframes(
     # Find common columns (numerical only)
     common_cols = set(cp_df.columns) & set(py_df.columns)
     numerical_cols = [
-        col for col in common_cols
-        if pd.api.types.is_numeric_dtype(cp_df[col]) and
-           pd.api.types.is_numeric_dtype(py_df[col]) and
-           not col.startswith('_')
+        col
+        for col in common_cols
+        if pd.api.types.is_numeric_dtype(cp_df[col])
+        and pd.api.types.is_numeric_dtype(py_df[col])
+        and not col.startswith("_")
     ]
 
-    results['columns_compared'] = len(numerical_cols)
+    results["columns_compared"] = len(numerical_cols)
 
     # Compare each numerical column
     for col in numerical_cols:
@@ -105,7 +114,7 @@ def compare_dataframes(
             continue
 
         # Calculate relative difference
-        with np.errstate(divide='ignore', invalid='ignore'):
+        with np.errstate(divide="ignore", invalid="ignore"):
             rel_diff = np.abs((py_vals - cp_vals) / (np.abs(cp_vals) + 1e-10))
 
         # Find values exceeding tolerance
@@ -114,9 +123,9 @@ def compare_dataframes(
         if np.any(exceeds_tolerance):
             n_exceeds = np.sum(exceeds_tolerance)
             max_diff = np.max(rel_diff[exceeds_tolerance])
-            results['discrepancies'].append(
-                f"{col}: {n_exceeds}/{len(cp_vals)} values exceed {tolerance*100}% tolerance "
-                f"(max diff: {max_diff*100:.2f}%)"
+            results["discrepancies"].append(
+                f"{col}: {n_exceeds}/{len(cp_vals)} values exceed {tolerance * 100}% tolerance "
+                f"(max diff: {max_diff * 100:.2f}%)"
             )
 
     return results
@@ -134,29 +143,33 @@ def validate_pipeline(cp_output_dir: Path, py_output_dir: Path, tolerance: float
     print("Comparing outputs:")
     print(f"  CellProfiler: {cp_output_dir}")
     print(f"  Python:       {py_output_dir}")
-    print(f"  Tolerance:    {tolerance*100}%\n")
+    print(f"  Tolerance:    {tolerance * 100}%\n")
 
     # Build image number mapping - CP Nuclei.csv has filenames, Python Image.csv has them
-    cp_nuclei = pd.read_csv(cp_output_dir / 'Nuclei.csv')
-    py_image = pd.read_csv(py_output_dir / 'Image.csv')
+    cp_nuclei = pd.read_csv(cp_output_dir / "Nuclei.csv")
+    py_image = pd.read_csv(py_output_dir / "Image.csv")
 
     # Get unique image keys from CP Nuclei.csv
-    cp_image_info = cp_nuclei[['ImageNumber', 'FileName_Hoechst']].drop_duplicates()
-    cp_image_info['_image_key'] = cp_image_info['FileName_Hoechst'].apply(extract_image_key)
+    cp_image_info = cp_nuclei[["ImageNumber", "FileName_Hoechst"]].drop_duplicates()
+    cp_image_info["_image_key"] = cp_image_info["FileName_Hoechst"].apply(extract_image_key)
 
-    py_image['_image_key'] = py_image['FileName_Hoechst'].apply(extract_image_key)
+    py_image["_image_key"] = py_image["FileName_Hoechst"].apply(extract_image_key)
 
     # Find common images
-    common_keys = set(cp_image_info['_image_key']) & set(py_image['_image_key'])
-    print(f"  Common images: {len(common_keys)} (CP has {len(cp_image_info)}, Python has {len(py_image)})\n")
+    common_keys = set(cp_image_info["_image_key"]) & set(py_image["_image_key"])
+    print(
+        f"  Common images: {len(common_keys)} (CP has {len(cp_image_info)}, Python has {len(py_image)})\n"
+    )
 
     # Build mapping from CP ImageNumber to Python ImageNumber via image_key
-    cp_key_to_num = dict(zip(cp_image_info['_image_key'], cp_image_info['ImageNumber'], strict=True))
-    py_key_to_num = dict(zip(py_image['_image_key'], py_image['ImageNumber'], strict=True))
+    cp_key_to_num = dict(
+        zip(cp_image_info["_image_key"], cp_image_info["ImageNumber"], strict=True)
+    )
+    py_key_to_num = dict(zip(py_image["_image_key"], py_image["ImageNumber"], strict=True))
     cp_to_py_image = {cp_key_to_num[k]: py_key_to_num[k] for k in common_keys}
 
     # Files to compare (skip Image.csv since CP version lacks filename columns)
-    files = ['Nuclei.csv', 'Expand_Nuclei.csv', 'Perinuclear_region.csv']
+    files = ["Nuclei.csv", "Expand_Nuclei.csv", "Perinuclear_region.csv"]
 
     all_results = []
 
@@ -181,41 +194,43 @@ def validate_pipeline(cp_output_dir: Path, py_output_dir: Path, tolerance: float
         else:
             # For object-level CSVs, filter to common images and compare
             # Filter CP to only images in common
-            cp_df = cp_df[cp_df['ImageNumber'].isin(cp_to_py_image.keys())].copy()
+            cp_df = cp_df[cp_df["ImageNumber"].isin(cp_to_py_image.keys())].copy()
 
             # Map CP ImageNumber to Python ImageNumber for matching
-            cp_df['_py_image'] = cp_df['ImageNumber'].map(cp_to_py_image)
+            cp_df["_py_image"] = cp_df["ImageNumber"].map(cp_to_py_image)
 
             # Filter Python to only images in common
             py_images_in_common = set(cp_to_py_image.values())
-            py_df = py_df[py_df['ImageNumber'].isin(py_images_in_common)].copy()
+            py_df = py_df[py_df["ImageNumber"].isin(py_images_in_common)].copy()
 
             # Sort both by (mapped image, object) for alignment
-            cp_df = cp_df.sort_values(['_py_image', 'ObjectNumber']).reset_index(drop=True)
-            py_df = py_df.sort_values(['ImageNumber', 'ObjectNumber']).reset_index(drop=True)
+            cp_df = cp_df.sort_values(["_py_image", "ObjectNumber"]).reset_index(drop=True)
+            py_df = py_df.sort_values(["ImageNumber", "ObjectNumber"]).reset_index(drop=True)
 
             results = {
-                'name': filename,
-                'cp_rows': len(cp_df),
-                'py_rows': len(py_df),
-                'row_count_match': len(cp_df) == len(py_df),
-                'discrepancies': []
+                "name": filename,
+                "cp_rows": len(cp_df),
+                "py_rows": len(py_df),
+                "row_count_match": len(cp_df) == len(py_df),
+                "discrepancies": [],
             }
 
-            if not results['row_count_match']:
-                results['discrepancies'].append(
+            if not results["row_count_match"]:
+                results["discrepancies"].append(
                     f"Row count mismatch in common images: CP={len(cp_df)}, Python={len(py_df)}"
                 )
             else:
                 # Find common numerical columns
                 common_cols = set(cp_df.columns) & set(py_df.columns)
                 numerical_cols = [
-                    col for col in common_cols
-                    if pd.api.types.is_numeric_dtype(cp_df[col]) and
-                       pd.api.types.is_numeric_dtype(py_df[col]) and
-                       not col.startswith('_') and col not in ['ImageNumber', 'ObjectNumber']
+                    col
+                    for col in common_cols
+                    if pd.api.types.is_numeric_dtype(cp_df[col])
+                    and pd.api.types.is_numeric_dtype(py_df[col])
+                    and not col.startswith("_")
+                    and col not in ["ImageNumber", "ObjectNumber"]
                 ]
-                results['columns_compared'] = len(numerical_cols)
+                results["columns_compared"] = len(numerical_cols)
 
                 for col in numerical_cols:
                     cp_vals = cp_df[col].values
@@ -224,35 +239,37 @@ def validate_pipeline(cp_output_dir: Path, py_output_dir: Path, tolerance: float
                     if np.all(np.isnan(cp_vals)) and np.all(np.isnan(py_vals)):
                         continue
 
-                    with np.errstate(divide='ignore', invalid='ignore'):
+                    with np.errstate(divide="ignore", invalid="ignore"):
                         rel_diff = np.abs((py_vals - cp_vals) / (np.abs(cp_vals) + 1e-10))
 
                     exceeds_tolerance = rel_diff > tolerance
                     if np.any(exceeds_tolerance):
                         n_exceeds = np.sum(exceeds_tolerance)
                         max_diff = np.max(rel_diff[exceeds_tolerance])
-                        results['discrepancies'].append(
-                            f"{col}: {n_exceeds}/{len(cp_vals)} values exceed {tolerance*100}% tolerance "
-                            f"(max diff: {max_diff*100:.2f}%)"
+                        results["discrepancies"].append(
+                            f"{col}: {n_exceeds}/{len(cp_vals)} values exceed {tolerance * 100}% tolerance "
+                            f"(max diff: {max_diff * 100:.2f}%)"
                         )
 
         all_results.append(results)
 
         # Print results
-        if results['discrepancies']:
+        if results["discrepancies"]:
             print(f"❌ {filename}:")
             print(f"   Rows: CP={results['cp_rows']}, Python={results['py_rows']}")
             print(f"   Columns compared: {results.get('columns_compared', 0)}")
-            for disc in results['discrepancies']:
+            for disc in results["discrepancies"]:
                 print(f"   - {disc}")
         else:
-            print(f"✅ {filename}: All measurements agree within {tolerance*100}% tolerance")
-            print(f"   Rows matched: {results.get('matched_rows', results['py_rows'])}, Columns compared: {results.get('columns_compared', 0)}")
+            print(f"✅ {filename}: All measurements agree within {tolerance * 100}% tolerance")
+            print(
+                f"   Rows matched: {results.get('matched_rows', results['py_rows'])}, Columns compared: {results.get('columns_compared', 0)}"
+            )
 
         print()
 
     # Summary
-    n_passed = sum(1 for r in all_results if not r['discrepancies'])
+    n_passed = sum(1 for r in all_results if not r["discrepancies"])
     n_total = len(all_results)
 
     print("=" * 60)
@@ -269,28 +286,22 @@ def validate_pipeline(cp_output_dir: Path, py_output_dir: Path, tolerance: float
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Validate Python pipeline outputs against CellProfiler'
+        description="Validate Python pipeline outputs against CellProfiler"
     )
 
     parser.add_argument(
-        '--cp_output',
-        type=Path,
-        required=True,
-        help='Directory with CellProfiler CSV outputs'
+        "--cp_output", type=Path, required=True, help="Directory with CellProfiler CSV outputs"
     )
 
     parser.add_argument(
-        '--py_output',
-        type=Path,
-        required=True,
-        help='Directory with Python pipeline CSV outputs'
+        "--py_output", type=Path, required=True, help="Directory with Python pipeline CSV outputs"
     )
 
     parser.add_argument(
-        '--tolerance',
+        "--tolerance",
         type=float,
         default=0.05,
-        help='Relative tolerance for numerical comparison (default 0.05 = 5%%)'
+        help="Relative tolerance for numerical comparison (default 0.05 = 5%%)",
     )
 
     args = parser.parse_args()
@@ -299,5 +310,5 @@ def main():
     exit(exit_code)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

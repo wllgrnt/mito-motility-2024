@@ -9,10 +9,11 @@ This pipeline analyzes the distribution of mitochondria (MIRO160mer) around nucl
 ### What it does:
 
 1. **Segments nuclei** from Hoechst (405nm) channel using 3-class Otsu thresholding
-2. **Defines perinuclear regions** (10-15 pixel rings around nuclei)
+2. **Defines perinuclear regions** (ring between eroded nuclei and 10px expansion)
 3. **Detects bright peripheral mitochondrial spots** in MIRO160mer (488nm) channel
 4. **Quantifies distribution metrics**: Gini coefficient, coefficient of variation (CoV), mass displacement, moments (skewness, kurtosis)
-5. **Exports CellProfiler-compatible CSV files** for downstream analysis
+5. **Aggregates results** per date with edge spot fractions and summary statistics
+6. **Generates figure tables** combining data across dates for publication figures
 
 ## Quick Start
 
@@ -34,14 +35,27 @@ uv sync
 ### Run the Pipeline
 
 ```bash
-# Process all dates
-uv run python -m edge_spot_analyser.pipeline --input inputs/ --output results/
+# Process all dates (includes per-date aggregation)
+uv run edge-spot-pipeline -i inputs/ -o results/
 
 # Process specific date with parallel workers
-uv run python -m edge_spot_analyser.pipeline --input inputs/ --output results/ --date 241223 --workers 10
+uv run edge-spot-pipeline -i inputs/ -o results/ -d 241223 -w 10
 
-# Use custom parameters
-uv run python -m edge_spot_analyser.pipeline --input inputs/ --output results/ --config params.json
+# Use custom parameters from Excel config
+uv run edge-spot-pipeline -i inputs/ -o results/ -c "christina obligations.xlsx"
+
+# Skip aggregation (only run image processing)
+uv run edge-spot-pipeline -i inputs/ -o results/ --skip-aggregate
+```
+
+### Run Aggregation Separately
+
+```bash
+# Per-date aggregation (edge spot fractions, Gini, etc.)
+uv run edge-spot-aggregate -i results/
+
+# Figure aggregation (combine across dates for publication figures)
+uv run edge-spot-figure-aggregate -r results/ -c "christina obligations.xlsx"
 ```
 
 ## Input Data Format
@@ -58,9 +72,10 @@ inputs/
       └── ...
 ```
 
-**Filename format**: `Well{WELL}_Channel{...}_Seq{SEQ}-MaxIP_XY{XY}_{CHANNEL}.tif`
+**Filename format**: `Well{WELL}_Channel{...}_Seq{SEQ}[-MaxIP]_XY{XY}_{CHANNEL}.tif`
 - `WELL`: Well identifier (e.g., B02, D10)
 - `SEQ`: Sequence number (e.g., 0000, 0009)
+- `-MaxIP`: Optional (maximum intensity projection indicator)
 - `XY`: XY position number (1-9)
 - `CHANNEL`: `405` for Hoechst (nuclear), `488` for MIRO160mer (mitochondrial)
 
@@ -68,7 +83,9 @@ Files are automatically matched by `(well, sequence, XY)` tuple.
 
 ## Parameter Configuration
 
-Customize parameters per date using a JSON configuration file:
+Parameters can be configured via JSON file or Excel spreadsheet.
+
+### JSON Configuration
 
 ```json
 {
@@ -79,15 +96,17 @@ Customize parameters per date using a JSON configuration file:
     "min_distance": 30,
     "edge_spot_diameter_min": 5,
     "edge_spot_diameter_max": 80,
-    "edge_spot_correction_factor": 2.0,
-    "inner_expansion": 10,
-    "outer_expansion": 15
+    "edge_spot_correction_factor": 2.0
   },
   "241223": {
     "otsu_correction_factor": 0.50
   }
 }
 ```
+
+### Excel Configuration
+
+The pipeline can read parameters from an Excel file with an `Otsu_params` sheet containing per-date settings and exclusions.
 
 ### Key Parameters
 
@@ -100,21 +119,34 @@ Customize parameters per date using a JSON configuration file:
 - **`edge_spot_correction_factor`** (default: 2.0): Multiplier for threshold. Higher = fewer spots detected.
 - **`edge_spot_diameter_min`** / **`edge_spot_diameter_max`** (default: 5/80): Spot diameter range in pixels
 
-**Perinuclear Regions**
-- **`inner_expansion`** (default: 10): Pixels to expand nuclei for inner boundary
-- **`outer_expansion`** (default: 15): Pixels to expand for outer boundary
-
 ## Output Files
+
+### Per-Date Output (from pipeline)
 
 ```
 results/
   └── 241223/
-      ├── Nuclei.csv              # Nuclear measurements (Hoechst intensity)
-      ├── Expand_Nuclei.csv       # Expanded nuclei (MIRO160mer, Gini, moments)
-      ├── Perinuclear_region.csv  # Perinuclear ring measurements
-      ├── edge_spots.csv          # Edge spot measurements
-      ├── Image.csv               # Image-level statistics
-      └── All_measurements.csv    # Combined summary
+      ├── Nuclei.csv                    # Nuclear measurements (Hoechst intensity)
+      ├── Expand_Nuclei.csv             # Expanded nuclei (MIRO160mer, Gini, moments)
+      ├── Perinuclear_region.csv        # Perinuclear ring measurements
+      ├── edge_spots.csv                # Edge spot measurements
+      ├── Image.csv                     # Image-level statistics
+      ├── All_measurements.csv          # Combined summary
+      ├── edge_spot_fraction_static.csv # Edge spot fractions per well
+      ├── GINI_Gini_MIRO160mer_fov_median_static.csv  # Gini per FOV
+      └── ...
+```
+
+### Figure Output (from figure aggregation)
+
+```
+results/
+  └── figures/
+      ├── Fig1D_edge_spot_raw.csv        # Raw values for Figure 1D
+      ├── Fig1D_edge_spot_normalized.csv # Normalized (per-date, control=1.0)
+      ├── Fig1D_gini_raw.csv
+      ├── Fig1D_gini_normalized.csv
+      └── ...
 ```
 
 ### Key Measurements
@@ -122,7 +154,7 @@ results/
 - **Gini coefficient** (`GINI_Gini_MIRO160mer`): Inequality measure (0=uniform, 1=concentrated)
 - **Mass displacement** (`Intensity_MassDisplacement_MIRO160mer`): Distance between intensity and geometric centroids
 - **Moments**: Mean, standard deviation, skewness, kurtosis
-- **Edge intensity**: Mean intensity at object border
+- **Edge spot fraction**: Proportion of nuclei with associated edge spots
 
 ## Validation
 
@@ -136,14 +168,19 @@ uv run python -m edge_spot_analyser.validate_pipeline \
 
 ## Algorithm Details
 
-### Nuclei Segmentation
+### Nuclei Segmentation (Module 7)
 - **Method**: 3-class Otsu thresholding (uses upper threshold)
 - **Smoothing**: Gaussian (σ=1.0, from threshold smoothing scale=2.0)
 - **Declumping**: Intensity-based watershed with min_distance=30px
 - **Size filtering**: 30-100 pixel diameter
 - **Border removal**: Yes
 
-### Edge Spot Detection (Robust Background)
+### Perinuclear Region (Modules 8, 9, 14)
+- **Expand_Nuclei**: Nuclei expanded by 10 pixels (for measurements)
+- **Expand_Nuclei_for_mask**: Nuclei expanded by 15 pixels (for masking only)
+- **Perinuclear_region**: Ring between eroded nuclei (1px erosion) and 10px expansion
+
+### Edge Spot Detection (Module 11 - Robust Background)
 1. Remove outliers: lowest 30%, highest 10%
 2. Calculate robust_mean = MEDIAN of remaining pixels
 3. Calculate robust_std = STD of remaining pixels
@@ -152,7 +189,7 @@ uv run python -m edge_spot_analyser.validate_pipeline \
 6. Apply Gaussian smoothing (σ=1.3) to binary mask
 7. Simple connected component labeling (no declumping)
 
-### Gini Coefficient
+### Gini Coefficient (Module 19)
 ```python
 flattened = sort(pixels)
 npix = len(pixels)
@@ -169,23 +206,25 @@ gini = sum(kernel) / normalization
 | Too many nuclei | Increase `otsu_correction_factor` (try 0.50-0.55) |
 | No edge spots | Decrease `edge_spot_correction_factor` (try 1.5-1.8) |
 | Too many edge spots | Increase `edge_spot_correction_factor` (try 2.5-3.0) |
+| Images not found | Check filename format matches expected pattern |
 
 ## File Structure
 
 ```
 edge_spot_analyser/
 ├── src/edge_spot_analyser/
-│   ├── pipeline.py          # Main pipeline (CLI entry point)
-│   ├── segmentation.py      # Segmentation algorithms
-│   ├── measurements.py      # Measurement functions
-│   ├── io_utils.py          # File I/O, CSV export
-│   └── validate_pipeline.py # Validation against CellProfiler
-├── pipeline_files/          # Original CellProfiler pipeline
-├── example_CP_output/       # Reference outputs for validation
-├── inputs/                  # Input images (by date)
-├── results/                 # Output CSVs (by date)
-├── pyproject.toml           # Package configuration
-└── params_example.json      # Example parameter config
+│   ├── pipeline.py            # Main pipeline (CLI: edge-spot-pipeline)
+│   ├── segmentation.py        # Segmentation algorithms
+│   ├── measurements.py        # Measurement functions
+│   ├── io_utils.py            # File I/O, CSV export
+│   ├── aggregation.py         # Per-date aggregation (CLI: edge-spot-aggregate)
+│   ├── figure_aggregation.py  # Cross-date figure tables (CLI: edge-spot-figure-aggregate)
+│   └── validate_pipeline.py   # Validation against CellProfiler
+├── pipeline_files/            # Original CellProfiler pipeline JSON
+├── inputs/                    # Input images (by date)
+├── results/                   # Output CSVs (by date)
+├── pyproject.toml             # Package configuration
+└── README.md
 ```
 
 ## License

@@ -32,17 +32,21 @@ class AggregationConfig:
     plot: bool = False
 
     # Column mappings (support multiple possible column names for flexibility)
-    mass_displacement_cols: dict[str, list[str]] = field(default_factory=lambda: {
-        "mass_displacement_60mer": [
-            "Intensity_MassDisplacement_MIRO160mer",
-            "Intensity_MassDisplacement_MIRO160mer_rescaled",
-        ],
-    })
+    mass_displacement_cols: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "mass_displacement_60mer": [
+                "Intensity_MassDisplacement_MIRO160mer",
+                "Intensity_MassDisplacement_MIRO160mer_rescaled",
+            ],
+        }
+    )
 
     # Extra columns to extract alongside CoV
-    bonus_cols: list[str] = field(default_factory=lambda: [
-        "GINI_Gini_MIRO160mer",
-    ])
+    bonus_cols: list[str] = field(
+        default_factory=lambda: [
+            "GINI_Gini_MIRO160mer",
+        ]
+    )
 
 
 class Aggregator:
@@ -128,9 +132,7 @@ class Aggregator:
         if self.config.t_varies:
             output_df["T"] = output_df["Image"][filename_column].apply(extract_timestamp)
         output_df["XY"] = output_df["Image"][filename_column].apply(extract_xy)
-        output_df["WellNumber"] = output_df["Image"][filename_column].apply(
-            extract_wellnumber
-        )
+        output_df["WellNumber"] = output_df["Image"][filename_column].apply(extract_wellnumber)
         output_df["nuclei_count"] = output_df["Nuclei"][nuclei_count_column]
         output_df["edge_spot_count"] = output_df["edge_spots"][edge_spot_count_column]
 
@@ -147,16 +149,12 @@ class Aggregator:
         # All_measurements.csv has ONE ROW PER IMAGE with actual counts
         # (e.g., 176 nuclei, 7 edge spots) - no aggregation needed
         # Calculate edge spot fraction directly, handling division by zero
-        output_df["edge_spot_fraction"] = (
-            output_df["edge_spot_count"] / output_df["nuclei_count"]
-        )
+        output_df["edge_spot_fraction"] = output_df["edge_spot_count"] / output_df["nuclei_count"]
 
         logger.info(f"Extracted edge spot data, output shape {output_df.shape}")
         return output_df
 
-    def _generate_edge_spot_time_files(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> None:
+    def _generate_edge_spot_time_files(self, df: pd.DataFrame, output_dir: Path) -> None:
         """Generate time-course edge spot files."""
         # File for each well number, T as columns, XY as rows
         for well_number in df.WellNumber.unique():
@@ -171,9 +169,7 @@ class Aggregator:
             )
 
         # Average over XYs, normalise and optionally plot
-        average_over_time = (
-            df.groupby(["WellNumber", "T"]).edge_spot_fraction.mean().reset_index()
-        )
+        average_over_time = df.groupby(["WellNumber", "T"]).edge_spot_fraction.mean().reset_index()
         pivot = pd.pivot_table(
             data=average_over_time,
             values="edge_spot_fraction",
@@ -188,9 +184,7 @@ class Aggregator:
         if self.config.plot:
             self._plot_time_series(pivot, "Edge spot fraction over time, normalised to T0")
 
-    def _generate_edge_spot_static_files(
-        self, df: pd.DataFrame, output_dir: Path
-    ) -> None:
+    def _generate_edge_spot_static_files(self, df: pd.DataFrame, output_dir: Path) -> None:
         """Generate static (single timepoint) edge spot files."""
         output_path = output_dir / "edge_spot_fraction_static.csv"
         self._save_pivot_table(
@@ -345,14 +339,10 @@ class Aggregator:
 
             # Complex multi-level structure with T and XY as columns
             output_path = output_dir / f"{data_column}_time_and_xy_{well_number}.csv"
-            temp_df = (
-                well_df.drop(columns=["WellNumber"]).set_index(["T", "XY"]).squeeze()
-            )
+            temp_df = well_df.drop(columns=["WellNumber"]).set_index(["T", "XY"]).squeeze()
             temp_df = temp_df.reset_index(name="value")
             temp_df["index"] = temp_df.groupby(["T", "XY"]).cumcount()
-            temp_df = temp_df.set_index(["T", "XY", "index"])["value"].unstack(
-                level=[0, 1]
-            )
+            temp_df = temp_df.set_index(["T", "XY", "index"])["value"].unstack(level=[0, 1])
             logger.info(f"Writing {data_column} table with shape {temp_df.shape}")
             temp_df.to_csv(output_path)
 
@@ -365,9 +355,7 @@ class Aggregator:
             stacked_df.to_csv(stacked_path)
 
         # Average over Well, T, save and optionally plot
-        average_over_time = (
-            subdf.groupby(["WellNumber", "T"])[data_column].mean().reset_index()
-        )
+        average_over_time = subdf.groupby(["WellNumber", "T"])[data_column].mean().reset_index()
         pivot = pd.pivot_table(
             data=average_over_time,
             values=data_column,
@@ -490,14 +478,16 @@ Examples:
     )
 
     parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         type=Path,
         required=True,
         help="Input directory containing CSV files",
     )
 
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         help="Output directory for aggregated files (defaults to input directory)",
     )

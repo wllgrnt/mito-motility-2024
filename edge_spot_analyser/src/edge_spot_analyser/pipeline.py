@@ -63,7 +63,9 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
     Returns:
         Dictionary with 'image_id', 'measurements' or 'error'
     """
-    image_pair, image_number, smooth_params, nuclei_params, edge_spot_params, perinuclear_params = args
+    image_pair, image_number, smooth_params, nuclei_params, edge_spot_params, perinuclear_params = (
+        args
+    )
 
     try:
         # Load images
@@ -80,19 +82,20 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
         if n_nuclei == 0:
             metadata = image_pair.to_metadata_dict(image_number)
             return {
-                'image_id': image_pair.image_id,
-                'measurements': {
-                    'Nuclei': pd.DataFrame(),
-                    'Expand_Nuclei': pd.DataFrame(),
-                    'Perinuclear_region': pd.DataFrame(),
-                    'edge_spots': pd.DataFrame(),
-                    'Image': pd.DataFrame([metadata]),
-                }
+                "image_id": image_pair.image_id,
+                "measurements": {
+                    "Nuclei": pd.DataFrame(),
+                    "Expand_Nuclei": pd.DataFrame(),
+                    "Perinuclear_region": pd.DataFrame(),
+                    "edge_spots": pd.DataFrame(),
+                    "Image": pd.DataFrame([metadata]),
+                },
             }
 
         # Create perinuclear regions
-        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = \
-            create_perinuclear_regions(nuclei_labels, perinuclear_params)
+        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = create_perinuclear_regions(
+            nuclei_labels, perinuclear_params
+        )
 
         # Mask peripheral regions
         masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px)
@@ -101,10 +104,11 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
         edge_spots_labels = detect_edge_spots(masked_miro, edge_spot_params)
         n_edge_spots = edge_spots_labels.max()
 
-        # Filter edge spots
+        # Filter edge spots (Module 13)
+        # CellProfiler measures and filters edge_spots on masked MIRO (Subtract_perinucleus_Miro160mer)
         if n_edge_spots > 0:
             edge_spots_labels = filter_edge_spots_by_edge_intensity(
-                edge_spots_labels, miro, min_edge_intensity=0.0, max_edge_intensity=1.0
+                edge_spots_labels, masked_miro, min_edge_intensity=0.0, max_edge_intensity=1.0
             )
 
         # Measure properties
@@ -116,21 +120,19 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
             edge_spots_labels=edge_spots_labels,
             hoechst_image=hoechst,
             miro_image=miro,
-            metadata=metadata
+            masked_miro_image=masked_miro,  # For edge_spots measurements (Module 12)
+            metadata=metadata,
         )
 
         return {
-            'image_id': image_pair.image_id,
-            'measurements': measurements,
-            'n_nuclei': n_nuclei,
-            'n_edge_spots': edge_spots_labels.max()
+            "image_id": image_pair.image_id,
+            "measurements": measurements,
+            "n_nuclei": n_nuclei,
+            "n_edge_spots": edge_spots_labels.max(),
         }
 
     except Exception as e:
-        return {
-            'image_id': image_pair.image_id,
-            'error': str(e)
-        }
+        return {"image_id": image_pair.image_id, "error": str(e)}
 
 
 class Pipeline:
@@ -141,7 +143,7 @@ class Pipeline:
         smooth_params: SmoothParams | None = None,
         nuclei_params: NucleiSegmentationParams | None = None,
         edge_spot_params: EdgeSpotParams | None = None,
-        perinuclear_params: PerinuclearRegionParams | None = None
+        perinuclear_params: PerinuclearRegionParams | None = None,
     ):
         """
         Initialize pipeline with parameters.
@@ -159,9 +161,7 @@ class Pipeline:
         self._current_exclusions: set[tuple[str, int]] = set()  # (well, xy) pairs to exclude
 
     def process_image_pair(
-        self,
-        image_pair: ImagePair,
-        image_number: int
+        self, image_pair: ImagePair, image_number: int
     ) -> dict[str, pd.DataFrame]:
         """
         Process a single image pair through the complete pipeline.
@@ -178,6 +178,10 @@ class Pipeline:
         # Load images
         hoechst, miro = ImageLoader.load_image_pair(image_pair)
 
+        # Apply smoothing (CellProfiler Smooth module) before segmentation
+        if self.smooth_params is not None:
+            hoechst = smooth_image(hoechst, self.smooth_params)
+
         # Step 1: Segment nuclei (Module 7)
         logger.debug("  Segmenting nuclei...")
         nuclei_labels = segment_nuclei(hoechst, self.nuclei_params)
@@ -190,8 +194,9 @@ class Pipeline:
 
         # Step 2: Create perinuclear regions (Modules 8-10, 14)
         logger.debug("  Creating perinuclear regions...")
-        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = \
-            create_perinuclear_regions(nuclei_labels, self.perinuclear_params)
+        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = create_perinuclear_regions(
+            nuclei_labels, self.perinuclear_params
+        )
 
         # Step 3: Mask peripheral regions (Module 10)
         logger.debug("  Masking peripheral regions...")
@@ -204,13 +209,14 @@ class Pipeline:
         logger.debug(f"  Found {n_edge_spots} edge spots")
 
         # Step 5: Filter edge spots by edge intensity (Module 13)
+        # CellProfiler measures and filters edge_spots on masked MIRO (Subtract_perinucleus_Miro160mer)
         if n_edge_spots > 0:
             logger.debug("  Filtering edge spots by edge intensity...")
             edge_spots_labels = filter_edge_spots_by_edge_intensity(
                 edge_spots_labels,
-                miro,
+                masked_miro,  # Use masked image per CellProfiler Module 12-13
                 min_edge_intensity=0.0,
-                max_edge_intensity=1.0
+                max_edge_intensity=1.0,
             )
             n_edge_spots_filtered = edge_spots_labels.max()
             logger.debug(f"  {n_edge_spots_filtered} spots after filtering")
@@ -226,19 +232,16 @@ class Pipeline:
             edge_spots_labels=edge_spots_labels,
             hoechst_image=hoechst,
             miro_image=miro,
-            metadata=metadata
+            masked_miro_image=masked_miro,  # For edge_spots measurements (Module 12)
+            metadata=metadata,
         )
 
-        logger.info(
-            f"  Complete: {n_nuclei} nuclei, {edge_spots_labels.max()} edge spots"
-        )
+        logger.info(f"  Complete: {n_nuclei} nuclei, {edge_spots_labels.max()} edge spots")
 
         return measurements
 
     def _empty_measurements(
-        self,
-        image_pair: ImagePair,
-        image_number: int
+        self, image_pair: ImagePair, image_number: int
     ) -> dict[str, pd.DataFrame]:
         """
         Create empty measurement dictionary for images with no nuclei.
@@ -253,19 +256,15 @@ class Pipeline:
         metadata = image_pair.to_metadata_dict(image_number)
 
         return {
-            'Nuclei': pd.DataFrame(),
-            'Expand_Nuclei': pd.DataFrame(),
-            'Perinuclear_region': pd.DataFrame(),
-            'edge_spots': pd.DataFrame(),
-            'Image': pd.DataFrame([metadata]),
+            "Nuclei": pd.DataFrame(),
+            "Expand_Nuclei": pd.DataFrame(),
+            "Perinuclear_region": pd.DataFrame(),
+            "edge_spots": pd.DataFrame(),
+            "Image": pd.DataFrame([metadata]),
         }
 
     def process_date_batch(
-        self,
-        input_dir: Path,
-        output_dir: Path,
-        date: str,
-        n_workers: int = 1
+        self, input_dir: Path, output_dir: Path, date: str, n_workers: int = 1
     ) -> None:
         """
         Process all images for a specific date.
@@ -291,16 +290,24 @@ class Pipeline:
         if self._current_exclusions:
             original_count = len(image_pairs)
             image_pairs = [
-                ip for ip in image_pairs
-                if not should_exclude_image(ip, self._current_exclusions)
+                ip for ip in image_pairs if not should_exclude_image(ip, self._current_exclusions)
             ]
             excluded_count = original_count - len(image_pairs)
             if excluded_count > 0:
-                logger.info(f"Excluded {excluded_count} images based on config: {self._current_exclusions}")
+                logger.info(
+                    f"Excluded {excluded_count} images based on config: {self._current_exclusions}"
+                )
 
         # Prepare args for parallel processing
         args_list = [
-            (pair, i, self.smooth_params, self.nuclei_params, self.edge_spot_params, self.perinuclear_params)
+            (
+                pair,
+                i,
+                self.smooth_params,
+                self.nuclei_params,
+                self.edge_spot_params,
+                self.perinuclear_params,
+            )
             for i, pair in enumerate(image_pairs, start=1)
         ]
 
@@ -310,26 +317,35 @@ class Pipeline:
             # Sequential processing
             for args in args_list:
                 result = _process_single_image(args)
-                if 'error' in result:
+                if "error" in result:
                     logger.error(f"Error processing {result['image_id']}: {result['error']}")
                 else:
-                    logger.info(f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots")
-                    all_measurements.append(result['measurements'])
+                    logger.info(
+                        f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots"
+                    )
+                    all_measurements.append(result["measurements"])
         else:
             # Parallel processing
             logger.info(f"Using {n_workers} parallel workers")
             with ProcessPoolExecutor(max_workers=n_workers) as executor:
-                futures = {executor.submit(_process_single_image, args): args[0].image_id for args in args_list}
+                futures = {
+                    executor.submit(_process_single_image, args): args[0].image_id
+                    for args in args_list
+                }
 
                 for future in as_completed(futures):
                     image_id = futures[future]
                     try:
                         result = future.result()
-                        if 'error' in result:
-                            logger.error(f"Error processing {result['image_id']}: {result['error']}")
+                        if "error" in result:
+                            logger.error(
+                                f"Error processing {result['image_id']}: {result['error']}"
+                            )
                         else:
-                            logger.info(f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots")
-                            all_measurements.append(result['measurements'])
+                            logger.info(
+                                f"  {result['image_id']}: {result.get('n_nuclei', 0)} nuclei, {result.get('n_edge_spots', 0)} edge spots"
+                            )
+                            all_measurements.append(result["measurements"])
                     except Exception as e:
                         logger.error(f"Error processing {image_id}: {e}")
 
@@ -345,7 +361,7 @@ class Pipeline:
         input_dir: Path,
         output_dir: Path,
         config: dict[str, dict[str, Any]] | None = None,
-        n_workers: int = 1
+        n_workers: int = 1,
     ) -> None:
         """
         Process all dates in the input directory.
@@ -392,59 +408,56 @@ class Pipeline:
             params: Dictionary of parameter overrides
         """
         # Update nuclei segmentation params
-        if 'otsu_correction_factor' in params:
-            self.nuclei_params.otsu_correction_factor = params['otsu_correction_factor']
-        if 'diameter_min' in params:
-            self.nuclei_params.diameter_min = params['diameter_min']
-        if 'diameter_max' in params:
-            self.nuclei_params.diameter_max = params['diameter_max']
-        if 'min_distance' in params:
-            self.nuclei_params.min_distance = params['min_distance']
-        if 'threshold_smoothing_scale' in params:
-            self.nuclei_params.threshold_smoothing_scale = params['threshold_smoothing_scale']
-        if 'threshold_lower_bound' in params:
-            self.nuclei_params.threshold_lower_bound = params['threshold_lower_bound']
-        if 'threshold_upper_bound' in params:
-            self.nuclei_params.threshold_upper_bound = params['threshold_upper_bound']
+        if "otsu_correction_factor" in params:
+            self.nuclei_params.otsu_correction_factor = params["otsu_correction_factor"]
+        if "diameter_min" in params:
+            self.nuclei_params.diameter_min = params["diameter_min"]
+        if "diameter_max" in params:
+            self.nuclei_params.diameter_max = params["diameter_max"]
+        if "min_distance" in params:
+            self.nuclei_params.min_distance = params["min_distance"]
+        if "threshold_smoothing_scale" in params:
+            self.nuclei_params.threshold_smoothing_scale = params["threshold_smoothing_scale"]
+        if "threshold_lower_bound" in params:
+            self.nuclei_params.threshold_lower_bound = params["threshold_lower_bound"]
+        if "threshold_upper_bound" in params:
+            self.nuclei_params.threshold_upper_bound = params["threshold_upper_bound"]
 
         # Update smooth params (CellProfiler Smooth module)
-        if 'smooth_artifact_diameter' in params:
+        if "smooth_artifact_diameter" in params:
             if self.smooth_params is None:
                 self.smooth_params = SmoothParams()
-            self.smooth_params.artifact_diameter = params['smooth_artifact_diameter']
-        if 'smooth_method' in params:
+            self.smooth_params.artifact_diameter = params["smooth_artifact_diameter"]
+        if "smooth_method" in params:
             if self.smooth_params is None:
                 self.smooth_params = SmoothParams()
-            self.smooth_params.method = params['smooth_method']
+            self.smooth_params.method = params["smooth_method"]
 
         # Update edge spot params
-        if 'edge_spot_diameter_min' in params:
-            self.edge_spot_params.diameter_min = params['edge_spot_diameter_min']
-        if 'edge_spot_diameter_max' in params:
-            self.edge_spot_params.diameter_max = params['edge_spot_diameter_max']
-        if 'edge_spot_correction_factor' in params:
-            self.edge_spot_params.correction_factor = params['edge_spot_correction_factor']
+        if "edge_spot_diameter_min" in params:
+            self.edge_spot_params.diameter_min = params["edge_spot_diameter_min"]
+        if "edge_spot_diameter_max" in params:
+            self.edge_spot_params.diameter_max = params["edge_spot_diameter_max"]
+        if "edge_spot_correction_factor" in params:
+            self.edge_spot_params.correction_factor = params["edge_spot_correction_factor"]
 
         # Update perinuclear region params
-        if 'inner_expansion' in params:
-            self.perinuclear_params.inner_expansion = params['inner_expansion']
-        if 'outer_expansion' in params:
-            self.perinuclear_params.outer_expansion = params['outer_expansion']
+        if "inner_expansion" in params:
+            self.perinuclear_params.inner_expansion = params["inner_expansion"]
+        if "outer_expansion" in params:
+            self.perinuclear_params.outer_expansion = params["outer_expansion"]
 
         # Update exclusions for current date
-        self._current_exclusions = params.get('exclusions', set())
+        self._current_exclusions = params.get("exclusions", set())
 
 
 def main():
     """Main entry point for CLI."""
     # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     parser = argparse.ArgumentParser(
-        description='Run CellProfiler pipeline in Python',
+        description="Run CellProfiler pipeline in Python",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -465,64 +478,51 @@ Examples:
 
   # Verbose logging
   edge-spot-pipeline --input inputs/ --output results/ --verbose
-        """
+        """,
     )
 
     parser.add_argument(
-        '--input', '-i',
+        "--input",
+        "-i",
         type=Path,
         required=True,
-        help='Input directory containing date subdirectories with TIF files'
+        help="Input directory containing date subdirectories with TIF files",
     )
 
     parser.add_argument(
-        '--output', '-o',
-        type=Path,
-        required=True,
-        help='Output directory for CSV files'
+        "--output", "-o", type=Path, required=True, help="Output directory for CSV files"
     )
 
-    parser.add_argument(
-        '--date', '-d',
-        type=str,
-        help='Process only this specific date (optional)'
-    )
+    parser.add_argument("--date", "-d", type=str, help="Process only this specific date (optional)")
 
     parser.add_argument(
-        '--config', '-c',
-        type=Path,
-        help='Path to parameter configuration file (JSON or YAML)'
+        "--config", "-c", type=Path, help="Path to parameter configuration file (JSON or YAML)"
     )
 
-    parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help='Enable verbose logging'
-    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
 
     parser.add_argument(
-        '--workers', '-w',
+        "--workers",
+        "-w",
         type=int,
         default=1,
-        help='Number of parallel workers (default: 1, use -1 for all CPUs)'
+        help="Number of parallel workers (default: 1, use -1 for all CPUs)",
     )
 
     parser.add_argument(
-        '--skip-aggregate',
-        action='store_true',
-        help='Skip aggregation step (only run image processing)'
+        "--skip-aggregate",
+        action="store_true",
+        help="Skip aggregation step (only run image processing)",
     )
 
     parser.add_argument(
-        '--t-varies',
-        action='store_true',
-        help='Enable time-course mode for aggregation'
+        "--t-varies", action="store_true", help="Enable time-course mode for aggregation"
     )
 
     parser.add_argument(
-        '--plot',
-        action='store_true',
-        help='Generate plots during aggregation (requires matplotlib)'
+        "--plot",
+        action="store_true",
+        help="Generate plots during aggregation (requires matplotlib)",
     )
 
     args = parser.parse_args()
@@ -587,5 +587,5 @@ Examples:
         logger.info("Aggregation complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

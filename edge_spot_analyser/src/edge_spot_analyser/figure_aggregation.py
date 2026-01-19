@@ -40,8 +40,7 @@ class FigureAggregator:
         # Load Excel file
         self.excel = pd.ExcelFile(config_path)
         self.figure_sheets = [
-            s for s in self.excel.sheet_names
-            if s.startswith("Fig") and s not in ("Figures",)
+            s for s in self.excel.sheet_names if s.startswith("Fig") and s not in ("Figures",)
         ]
         logger.info(f"Found {len(self.figure_sheets)} figure sheets: {self.figure_sheets}")
 
@@ -110,9 +109,7 @@ class FigureAggregator:
 
         # Create DataFrames and save
         if edge_spot_data:
-            self._save_figure_outputs(
-                edge_spot_data, sheet_name, "edge_spot", conditions
-            )
+            self._save_figure_outputs(edge_spot_data, sheet_name, "edge_spot", conditions)
         else:
             logger.warning(f"No edge spot data found for {sheet_name}")
 
@@ -121,9 +118,7 @@ class FigureAggregator:
         else:
             logger.warning(f"No Gini data found for {sheet_name}")
 
-    def _load_well_data(
-        self, date_str: str, well: str, filename: str
-    ) -> pd.Series | None:
+    def _load_well_data(self, date_str: str, well: str, filename: str) -> pd.Series | None:
         """
         Load a single well's column from a static CSV file.
 
@@ -209,9 +204,7 @@ class FigureAggregator:
             normalized_df = df.copy()
             for date in dates:
                 date_cols = [c for c in df.columns if f"_{date}_" in c]
-                control_cols = [
-                    c for c in date_cols if c.startswith(f"{first_condition}_")
-                ]
+                control_cols = [c for c in date_cols if c.startswith(f"{first_condition}_")]
 
                 if control_cols:
                     control_mean = df[control_cols].mean().mean()
@@ -223,9 +216,7 @@ class FigureAggregator:
                             "skipping normalization for this date"
                         )
                 else:
-                    logger.warning(
-                        f"No control columns found for {fig_name} date {date}"
-                    )
+                    logger.warning(f"No control columns found for {fig_name} date {date}")
 
             norm_path = self.output_dir / f"{fig_name}_{metric}_normalized.csv"
             normalized_df.to_csv(norm_path)
@@ -233,9 +224,7 @@ class FigureAggregator:
         else:
             logger.warning(f"No dates found in columns for {fig_name}")
 
-    def _sort_columns_by_condition(
-        self, columns: list[str], conditions: list[str]
-    ) -> list[str]:
+    def _sort_columns_by_condition(self, columns: list[str], conditions: list[str]) -> list[str]:
         """Sort columns by condition order, then by date/well."""
         sanitized_conditions = [self._sanitize_name(c) for c in conditions]
 
@@ -274,21 +263,24 @@ Examples:
     )
 
     parser.add_argument(
-        "--results", "-r",
+        "--results",
+        "-r",
         type=Path,
         required=True,
         help="Directory containing date-based result folders",
     )
 
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=Path,
         required=True,
         help="Excel config file with Figure sheets",
     )
 
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         help="Output directory (defaults to results/figures)",
     )
