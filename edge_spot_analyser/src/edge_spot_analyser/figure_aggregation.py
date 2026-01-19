@@ -7,6 +7,7 @@ Excel file, combining data across dates and wells into condition-based tables.
 
 import argparse
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -192,21 +193,45 @@ class FigureAggregator:
         df.to_csv(raw_path)
         logger.info(f"Wrote raw {metric} data to {raw_path}")
 
-        # Calculate normalized data (normalize to mean of first condition)
+        # Calculate normalized data (normalize per-date by that date's control mean)
+        # Column format: {condition}_{date}_{well}
         first_condition = self._sanitize_name(conditions[0])
-        control_cols = [c for c in df.columns if c.startswith(f"{first_condition}_")]
+        date_pattern = re.compile(r"_(\d{6})_")
 
-        if control_cols:
-            control_mean = df[control_cols].mean().mean()
-            if control_mean != 0:
-                normalized_df = df / control_mean
-                norm_path = self.output_dir / f"{fig_name}_{metric}_normalized.csv"
-                normalized_df.to_csv(norm_path)
-                logger.info(f"Wrote normalized {metric} data to {norm_path}")
-            else:
-                logger.warning(f"Control mean is zero for {fig_name}, skipping normalization")
+        # Extract unique dates from column names
+        dates = set()
+        for col in df.columns:
+            match = date_pattern.search(col)
+            if match:
+                dates.add(match.group(1))
+
+        if dates:
+            normalized_df = df.copy()
+            for date in dates:
+                date_cols = [c for c in df.columns if f"_{date}_" in c]
+                control_cols = [
+                    c for c in date_cols if c.startswith(f"{first_condition}_")
+                ]
+
+                if control_cols:
+                    control_mean = df[control_cols].mean().mean()
+                    if control_mean != 0:
+                        normalized_df[date_cols] = df[date_cols] / control_mean
+                    else:
+                        logger.warning(
+                            f"Control mean is zero for {fig_name} date {date}, "
+                            "skipping normalization for this date"
+                        )
+                else:
+                    logger.warning(
+                        f"No control columns found for {fig_name} date {date}"
+                    )
+
+            norm_path = self.output_dir / f"{fig_name}_{metric}_normalized.csv"
+            normalized_df.to_csv(norm_path)
+            logger.info(f"Wrote normalized {metric} data to {norm_path}")
         else:
-            logger.warning(f"No control columns found for {fig_name}, skipping normalization")
+            logger.warning(f"No dates found in columns for {fig_name}")
 
     def _sort_columns_by_condition(
         self, columns: list[str], conditions: list[str]

@@ -335,9 +335,12 @@ def create_perinuclear_regions(
     Create perinuclear regions by expanding nuclei.
 
     Implements CellProfiler Modules 8-10, 14:
-    - Module 8: Expand nuclei by 10 pixels
-    - Module 9: Expand nuclei by 15 pixels (for masking)
-    - Module 14: Create tertiary object (ring between 10px and 15px)
+    - Module 8: Expand nuclei by 10 pixels (Expand_Nuclei)
+    - Module 9: Expand nuclei by 15 pixels (Expand_Nuclei_for_mask, for masking)
+    - Module 14: Create tertiary object (Perinuclear_region)
+      - Larger object: Expand_Nuclei (10px expansion)
+      - Smaller object: Nuclei (original, eroded by 1px)
+      - Result: Ring between eroded nuclei and 10px expansion
 
     Args:
         nuclei_labels: Labeled image of nuclei
@@ -347,7 +350,7 @@ def create_perinuclear_regions(
         Tuple of (expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring)
         - expand_nuclei_10px: Nuclei expanded by 10 pixels
         - expand_nuclei_15px: Nuclei expanded by 15 pixels
-        - perinuclear_ring: Ring region between 10px and 15px expansion
+        - perinuclear_ring: Ring between eroded nuclei and 10px expansion
     """
     if params is None:
         params = PerinuclearRegionParams()
@@ -365,10 +368,15 @@ def create_perinuclear_regions(
     )
 
     # Module 14: Create tertiary object (perinuclear ring)
-    # This is the region between 10px and 15px expansion
+    # CellProfiler IdentifyTertiaryObjects with:
+    #   - Larger: Expand_Nuclei (10px expansion)
+    #   - Smaller: Nuclei (original)
+    #   - "Shrink smaller object prior to subtraction": Yes (erode by 1px)
+    # Result: Ring between (nuclei eroded by 1px) and (10px expansion)
+    eroded_nuclei = morphology.erosion(nuclei_labels, morphology.disk(1))
     perinuclear_ring = np.where(
-        (expand_nuclei_15px > 0) & (expand_nuclei_10px == 0),
-        expand_nuclei_15px,  # Keep the nucleus label
+        (expand_nuclei_10px > 0) & (eroded_nuclei == 0),
+        expand_nuclei_10px,  # Keep the nucleus label from expansion
         0
     )
 

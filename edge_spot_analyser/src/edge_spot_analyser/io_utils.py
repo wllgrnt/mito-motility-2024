@@ -177,8 +177,10 @@ class FileDiscovery:
         """
         Parse filename to extract metadata.
 
-        Expected format: Well{WELL}_Channel{...}_Seq{SEQ}-MaxIP_XY{XY}_{CHANNEL}
-        Example: "WellD10_Channel405,561,488,640_Seq0009-MaxIP_XY9_405"
+        Expected format: Well{WELL}_Channel{...}_Seq{SEQ}[-MaxIP]_XY{XY}_{CHANNEL}
+        Examples:
+            "WellD10_Channel405,561,488,640_Seq0009-MaxIP_XY9_405"
+            "WellB02_Channel405,561,488,640_Seq0000_XY1_405"
 
         Args:
             filename: Filename without extension
@@ -186,9 +188,9 @@ class FileDiscovery:
         Returns:
             Dictionary with parsed components or None if parsing fails
         """
-        # Pattern: [Plate000_]WellXXX_ChannelYYY_SeqZZZZ-MaxIP_XYAA_CCC
-        # Optional Plate prefix to handle different naming conventions
-        pattern = r"^(?:Plate\d+_)?Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_XY(\d+)_(\d+)$"
+        # Pattern: [Plate000_]WellXXX_ChannelYYY_SeqZZZZ[-MaxIP]_XYAA_CCC
+        # Optional Plate prefix and optional -MaxIP suffix to handle different naming conventions
+        pattern = r"^(?:Plate\d+_)?Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)(?:-MaxIP)?_XY(\d+)_(\d+)$"
 
         match = re.match(pattern, filename)
         if match:
