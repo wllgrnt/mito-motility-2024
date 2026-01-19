@@ -12,6 +12,7 @@ Author: Generated from CellProfiler pipeline 231115_combined_pipeline_new_nomito
 Pipeline Version: v6
 """
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +21,8 @@ from scipy import ndimage
 from scipy.ndimage import gaussian_filter, median_filter
 from skimage import filters, measure, morphology, segmentation
 from skimage.feature import peak_local_max
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -172,10 +175,15 @@ def segment_nuclei(
     # This returns (lower_threshold, upper_threshold) dividing into 3 classes
     # We use the upper threshold (middle class → background, as per CellProfiler settings)
     try:
-        lower_thresh, upper_thresh = otsu3(smoothed.ravel())
+        # Suppress numpy warnings from centrosome's otsu3 (division edge cases)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            lower_thresh, upper_thresh = otsu3(smoothed.ravel())
         threshold = upper_thresh
     except (ValueError, IndexError):
         # Fallback if image has insufficient dynamic range
+        logger.warning(
+            "3-class Otsu failed (low dynamic range), falling back to 2-class Otsu"
+        )
         threshold = filters.threshold_otsu(smoothed)
 
     # Step 3: Apply correction factor and clip to bounds
