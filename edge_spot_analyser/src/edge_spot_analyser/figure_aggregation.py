@@ -204,7 +204,12 @@ class FigureAggregator:
             normalized_df = df.copy()
             for date in dates:
                 date_cols = [c for c in df.columns if f"_{date}_" in c]
-                control_cols = [c for c in date_cols if c.startswith(f"{first_condition}_")]
+                # Match exact condition: {condition}_{date}_{well}
+                # Use regex to avoid partial matches (e.g., "T2" matching "T2_E242R")
+                control_pattern = re.compile(
+                    rf"^{re.escape(first_condition)}_\d{{6}}_[A-H]\d{{2}}$"
+                )
+                control_cols = [c for c in date_cols if control_pattern.match(c)]
 
                 if control_cols:
                     control_mean = df[control_cols].mean().mean()

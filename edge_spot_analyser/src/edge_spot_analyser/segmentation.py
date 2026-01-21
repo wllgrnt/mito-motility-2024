@@ -106,7 +106,7 @@ class EdgeSpotParams:
     num_deviations: float = 6.0  # Number of standard deviations above robust mean
     correction_factor: float = 2.0  # Multiplier applied to calculated threshold
     threshold_lower_bound: float = 0.0035  # Absolute minimum threshold
-    threshold_smoothing: float = 1.3  # Gaussian smoothing applied to binary mask
+    threshold_smoothing: float = 1.3  # Gaussian smoothing applied to image before thresholding
     discard_border_objects: bool = True  # Remove objects touching image border
 
     @property
@@ -468,14 +468,13 @@ def detect_edge_spots(masked_miro: np.ndarray, params: EdgeSpotParams | None = N
     Implements CellProfiler Module 11 (IdentifyPrimaryObjects → edge_spots).
 
     Algorithm:
-    1. Calculate threshold using Robust Background method
-    2. Create binary mask: image > threshold
-    3. Apply Gaussian smoothing to BINARY MASK (σ=1.3)
-    4. Re-threshold smoothed mask at 0.5
-    5. Label connected components (NO watershed declumping)
-    6. Fill holes
-    7. Filter by size (5-80 pixel diameter)
-    8. Remove border objects
+    1. Apply Gaussian smoothing to image (σ = threshold_smoothing / 2.0)
+    2. Calculate threshold using Robust Background method on smoothed image
+    3. Create binary mask: smoothed > threshold
+    4. Label connected components (NO watershed declumping)
+    5. Fill holes
+    6. Filter by size (5-80 pixel diameter)
+    7. Remove border objects
 
     Args:
         masked_miro: 2D float array of masked MIRO160mer (peripheral regions only)
@@ -491,9 +490,14 @@ def detect_edge_spots(masked_miro: np.ndarray, params: EdgeSpotParams | None = N
     if params is None:
         params = EdgeSpotParams()
 
-    # Step 1: Calculate threshold using Robust Background
+    # Step 1: Apply Gaussian smoothing to image before thresholding (CellProfiler behavior)
+    # CellProfiler "Threshold smoothing scale" of N → sigma = N/2 (matches nuclei segmentation)
+    sigma = params.threshold_smoothing / 2.0
+    smoothed = gaussian_filter(masked_miro, sigma=sigma)
+
+    # Step 2: Calculate threshold using Robust Background on smoothed image
     threshold = robust_background_threshold(
-        masked_miro,
+        smoothed,
         lower_outlier_fraction=params.lower_outlier_fraction,
         upper_outlier_fraction=params.upper_outlier_fraction,
         num_deviations=params.num_deviations,
@@ -502,17 +506,10 @@ def detect_edge_spots(masked_miro: np.ndarray, params: EdgeSpotParams | None = N
         upper_bound=1.0,
     )
 
-    # Step 2: Create binary mask
-    binary = masked_miro > threshold
+    # Step 3: Create binary mask from smoothed image
+    binary = smoothed > threshold
 
-    # Step 3: Apply Gaussian smoothing to BINARY MASK (not the image!)
-    # This is a critical difference from nuclei segmentation
-    binary_smoothed = gaussian_filter(binary.astype(float), sigma=params.threshold_smoothing)
-
-    # Step 4: Re-threshold smoothed mask
-    binary = binary_smoothed > 0.5
-
-    # Step 5: Label connected components
+    # Step 4: Label connected components
     # IMPORTANT: Module 11 uses "Method to distinguish clumped objects: None"
     # This means NO watershed, just simple connected component labeling
     labels = measure.label(binary)
