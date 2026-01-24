@@ -170,10 +170,16 @@ class FileDiscovery:
         """
         Parse filename to extract metadata.
 
-        Expected format: Well{WELL}_Channel{...}_Seq{SEQ}[-MaxIP]_XY{XY}_{CHANNEL}
-        Examples:
-            "WellD10_Channel405,561,488,640_Seq0009-MaxIP_XY9_405"
-            "WellB02_Channel405,561,488,640_Seq0000_XY1_405"
+        Supported formats:
+            1. Standard XY format: Well{WELL}_Channel..._Seq{SEQ}[-MaxIP]_XY{N}_{CHANNEL}
+               Example: "WellD10_Channel405,561,488,640_Seq0009-MaxIP_XY9_405"
+
+            2. Round 2 crop_T1 format: Well{WELL}_Channel..._Seq{SEQ}-MaxIP_crop_T1_XY{N}_{CHANNEL}
+               Example: "WellE03_Channel405,561,488,640_Seq0003-MaxIP_crop_T1_XY8_405"
+
+            3. Round 2 4-digit format: Well{WELL}_Channel..._Seq{SEQ}-MaxIP_{WELL}_{0000-9999}_{CHANNEL}
+               Example: "WellF02_Channel405,561,488,640_Seq0001-MaxIP_F02_0007_405"
+               Note: Position is 0-indexed, so 0000 -> XY1, 0008 -> XY9
 
         Args:
             filename: Filename without extension
@@ -181,16 +187,62 @@ class FileDiscovery:
         Returns:
             Dictionary with parsed components or None if parsing fails
         """
-        # Pattern: [Plate000_]WellXXX_ChannelYYY_SeqZZZZ[-MaxIP]_XYAA_CCC
-        # Optional Plate prefix and optional -MaxIP suffix to handle different naming conventions
-        pattern = r"^(?:Plate\d+_)?Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)(?:-MaxIP)?_XY(\d+)_(\d+)$"
-
-        match = re.match(pattern, filename)
+        # Pattern 1: Standard XY format
+        # [Plate000_]WellXXX_ChannelYYY_SeqZZZZ[-MaxIP]_XY{N}_{CHANNEL}
+        pattern_xy = (
+            r"^(?:Plate\d+_)?Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)(?:-MaxIP)?_XY(\d+)_(\d+)$"
+        )
+        match = re.match(pattern_xy, filename)
         if match:
             return {
                 "well": match.group(1),
                 "sequence": f"Seq{match.group(2)}",
                 "xy": f"XY{match.group(3)}",
+                "channel": match.group(4),
+            }
+
+        # Pattern 2: Round 2 crop_T1 format with XY
+        # WellXXX_ChannelYYY_SeqZZZZ-MaxIP_crop_T1_XY{N}_{CHANNEL}
+        pattern_crop_t1 = r"^Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_crop_T1_XY(\d+)_(\d+)$"
+        match = re.match(pattern_crop_t1, filename)
+        if match:
+            return {
+                "well": match.group(1),
+                "sequence": f"Seq{match.group(2)}",
+                "xy": f"XY{match.group(3)}",
+                "channel": match.group(4),
+            }
+
+        # Pattern 3: Round 2 4-digit position format (without crop_T1)
+        # WellXXX_ChannelYYY_SeqZZZZ-MaxIP_{WELL}_{0000-9999}_{CHANNEL}
+        pattern_4digit = r"^Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_[A-Z]\d+_(\d{4})_(\d+)$"
+        match = re.match(pattern_4digit, filename)
+        if match:
+            # Site is the last digit of position (0006 -> site 6)
+            position = int(match.group(3))
+            site = position % 10
+            return {
+                "well": match.group(1),
+                "sequence": f"Seq{match.group(2)}",
+                "xy": f"XY{site}",
+                "channel": match.group(4),
+            }
+
+        # Pattern 4: Round 2 4-digit position format WITH crop_T1
+        # WellXXX_ChannelYYY_SeqZZZZ-MaxIP_crop_T1_{WELL}_{0000-9999}_{CHANNEL}
+        # Example: WellB02_Channel405,561,488,640_Seq0000-MaxIP_crop_T1_B02_0000_405
+        pattern_4digit_crop = (
+            r"^Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_crop_T1_[A-Z]\d+_(\d{4})_(\d+)$"
+        )
+        match = re.match(pattern_4digit_crop, filename)
+        if match:
+            # Site is the last digit of position (0006 -> site 6)
+            position = int(match.group(3))
+            site = position % 10
+            return {
+                "well": match.group(1),
+                "sequence": f"Seq{match.group(2)}",
+                "xy": f"XY{site}",
                 "channel": match.group(4),
             }
 
@@ -631,9 +683,10 @@ def parse_exclusions(exclusion_str: str) -> set[tuple[str, int]]:
     Parse exclusion string into set of (well, xy) tuples.
 
     Handles formats like:
-    - "E06,XY9 & D05, XY6 & C04, XY4"
+    - "E06,XY9 & D05, XY6 & C04, XY4"  (XY format)
     - "F04, XY1"
     - "B06, XY1 & B07,XY1 & B07, XY3"
+    - "C09,0007 & D04,0004"  (4-digit format, 0-indexed: 0007 -> XY8)
 
     Args:
         exclusion_str: String containing exclusions separated by '&'
@@ -654,15 +707,26 @@ def parse_exclusions(exclusion_str: str) -> set[tuple[str, int]]:
         if not part:
             continue
 
-        # Parse "Well, XY#" or "Well,XY#" format
+        # Try XY format first: "Well, XY#" or "Well,XY#"
         # Examples: "E06,XY9", "D05, XY6", "B07, XY3"
         match = re.match(r"([A-Z]\d+)\s*,\s*XY\s*(\d+)", part, re.IGNORECASE)
         if match:
             well = match.group(1).upper()
             xy = int(match.group(2))
             exclusions.add((well, xy))
-        else:
-            logger.warning(f"Could not parse exclusion: '{part}'")
+            continue
+
+        # Try 4-digit format: "Well,0000" (0-indexed position)
+        # Examples: "C09,0007" -> ('C09', 8), "D04,0004" -> ('D04', 5)
+        match = re.match(r"([A-Z]\d+)\s*,\s*(\d{4})", part, re.IGNORECASE)
+        if match:
+            well = match.group(1).upper()
+            position = int(match.group(2))
+            xy = position + 1  # Convert 0-indexed to 1-indexed
+            exclusions.add((well, xy))
+            continue
+
+        logger.warning(f"Could not parse exclusion: '{part}'")
 
     return exclusions
 

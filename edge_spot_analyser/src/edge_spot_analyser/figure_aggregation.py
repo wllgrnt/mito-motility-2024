@@ -79,8 +79,11 @@ class FigureAggregator:
             if pd.isna(date_val):
                 continue
 
-            # Convert date to string (handle both int and float)
-            date_str = str(int(date_val))
+            # Convert date to string (handle int, float, or string with suffix like "231120_1")
+            if isinstance(date_val, str):
+                date_str = date_val.strip()
+            else:
+                date_str = str(int(date_val))
 
             for condition in conditions:
                 well_val = row[condition]
@@ -191,7 +194,8 @@ class FigureAggregator:
         # Calculate normalized data (normalize per-date by that date's control mean)
         # Column format: {condition}_{date}_{well}
         first_condition = self._sanitize_name(conditions[0])
-        date_pattern = re.compile(r"_(\d{6})_")
+        # Date pattern matches 6 digits optionally followed by underscore and more digits (e.g., 231120_1)
+        date_pattern = re.compile(r"_(\d{6}(?:_\d+)?)_")
 
         # Extract unique dates from column names
         dates = set()
@@ -206,8 +210,9 @@ class FigureAggregator:
                 date_cols = [c for c in df.columns if f"_{date}_" in c]
                 # Match exact condition: {condition}_{date}_{well}
                 # Use regex to avoid partial matches (e.g., "T2" matching "T2_E242R")
+                # Date can have optional suffix like _1 or _2 (e.g., 231120_1)
                 control_pattern = re.compile(
-                    rf"^{re.escape(first_condition)}_\d{{6}}_[A-H]\d{{2}}$"
+                    rf"^{re.escape(first_condition)}_\d{{6}}(?:_\d+)?_[A-H]\d{{2}}$"
                 )
                 control_cols = [c for c in date_cols if control_pattern.match(c)]
 
