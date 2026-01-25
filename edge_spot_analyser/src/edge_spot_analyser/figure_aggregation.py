@@ -39,10 +39,27 @@ class FigureAggregator:
 
         # Load Excel file
         self.excel = pd.ExcelFile(config_path)
-        self.figure_sheets = [
-            s for s in self.excel.sheet_names if s.startswith("Fig") and s not in ("Figures",)
-        ]
+        self.figure_sheets = self._detect_figure_sheets()
         logger.info(f"Found {len(self.figure_sheets)} figure sheets: {self.figure_sheets}")
+
+    def _detect_figure_sheets(self) -> list[str]:
+        """
+        Detect figure sheets in the Excel file.
+
+        If any sheets start with 'Fig', use those (backwards compatible).
+        Otherwise, treat all sheets except known non-figure sheets as figure sheets.
+        """
+        non_figure_sheets = {"Otsu_params", "Aggregate", "Figures"}
+
+        # Check for Fig-prefixed sheets first (backwards compatible)
+        fig_sheets = [
+            s for s in self.excel.sheet_names if s.startswith("Fig") and s not in non_figure_sheets
+        ]
+        if fig_sheets:
+            return fig_sheets
+
+        # Otherwise, use all sheets except known non-figure sheets
+        return [s for s in self.excel.sheet_names if s not in non_figure_sheets]
 
     def process_all_figures(self) -> None:
         """Process all figure sheets."""

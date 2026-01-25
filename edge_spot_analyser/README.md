@@ -2,6 +2,20 @@
 
 A re-implementation of the CellProfiler pipeline initially used to generate the figures in https://www.biorxiv.org/content/10.1101/2024.09.13.612963v1.
 
+## Citation
+
+If you use this software, please cite:
+
+> [Paper citation placeholder - to be updated upon publication]
+
+## Raw Data Availability
+
+The raw microscopy data (~240GB of TIF files) is available on Zenodo:
+
+> **DOI:** [Zenodo DOI placeholder - to be filled after data upload]
+
+After downloading, extract the data into the `inputs/` directory to match the expected structure described below.
+
 The prior pipeline's spec can be found in `pipeline_files/` - this output was then analysed using `cellprofiler_output_analyser.py` in the repo root. During the revision process we needed to re-run the CellProfiler pipeline with different parameters, so it made since to port our pipeline into Python, and consolidate all the analysis work into one location.
 
 
@@ -69,7 +83,7 @@ uv run edge-spot-pipeline -i inputs/ -o results/
 uv run edge-spot-pipeline -i inputs/ -o results/ -d 241223 -w 10
 
 # Use custom parameters from Excel config
-uv run edge-spot-pipeline -i inputs/ -o results/ -c "christina obligations.xlsx"
+uv run edge-spot-pipeline -i inputs/ -o results/ -c config.xlsx
 
 # Skip aggregation (only run image processing)
 uv run edge-spot-pipeline -i inputs/ -o results/ --skip-aggregate
@@ -82,7 +96,7 @@ uv run edge-spot-pipeline -i inputs/ -o results/ --skip-aggregate
 uv run edge-spot-aggregate -i results/
 
 # Figure aggregation (combine across dates for publication figures)
-uv run edge-spot-figure-aggregate -r results/ -c "christina obligations.xlsx"
+uv run edge-spot-figure-aggregate -r results/ -c config.xlsx
 ```
 
 ## Input Data Format
