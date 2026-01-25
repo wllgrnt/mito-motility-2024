@@ -16,7 +16,6 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
-from centrosome.otsu import otsu3
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter, median_filter
 from skimage import filters, measure, morphology, segmentation
@@ -169,14 +168,13 @@ def segment_nuclei(
     sigma = params.threshold_smoothing_scale / 2.0
     smoothed = gaussian_filter(smoothed, sigma=sigma)
 
-    # Step 2: Calculate 3-class Otsu thresholds using CellProfiler's centrosome library
-    # This returns (lower_threshold, upper_threshold) dividing into 3 classes
-    # We use the upper threshold (middle class → background, as per CellProfiler settings)
+    # Step 2: Calculate 3-class Otsu thresholds using skimage (matches CellProfiler)
+    # threshold_multiotsu returns array of thresholds dividing into N classes
+    # For 3 classes with middle→background, we use the upper threshold (index 1)
+    # CellProfiler uses 128 histogram bins by default
     try:
-        # Suppress numpy warnings from centrosome's otsu3 (division edge cases)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            lower_thresh, upper_thresh = otsu3(smoothed.ravel())
-        threshold = upper_thresh
+        thresholds = filters.threshold_multiotsu(smoothed, classes=3, nbins=128)
+        threshold = thresholds[1]  # Upper threshold (middle class → background)
     except (ValueError, IndexError):
         # Fallback if image has insufficient dynamic range
         logger.warning("3-class Otsu failed (low dynamic range), falling back to 2-class Otsu")
