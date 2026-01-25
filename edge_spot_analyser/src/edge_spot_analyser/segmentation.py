@@ -275,15 +275,17 @@ def _fill_holes_in_labels(labels: np.ndarray) -> np.ndarray:
     Returns:
         Labeled image with holes filled in each object
     """
-    output = np.zeros_like(labels)
+    output = labels.copy()  # Start with original labels to preserve existing assignments
 
     for label_id in range(1, labels.max() + 1):
         # Extract single object mask
         obj_mask = labels == label_id
         # Fill holes in this object
         filled = ndimage.binary_fill_holes(obj_mask)
-        # Add back to output with original label
-        output[filled] = label_id
+        # Only fill holes that don't overlap with other objects
+        # This prevents merging adjacent objects whose filled holes would touch
+        new_pixels = filled & (output == 0)
+        output[new_pixels] = label_id
 
     return output
 

@@ -215,12 +215,13 @@ class FileDiscovery:
 
         # Pattern 3: Round 2 4-digit position format (without crop_T1)
         # WellXXX_ChannelYYY_SeqZZZZ-MaxIP_{WELL}_{0000-9999}_{CHANNEL}
+        # Position is 0-indexed, XY is 1-indexed: 0000 -> XY1, 0007 -> XY8
         pattern_4digit = r"^Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_[A-Z]\d+_(\d{4})_(\d+)$"
         match = re.match(pattern_4digit, filename)
         if match:
-            # Site is the last digit of position (0006 -> site 6)
+            # Site is last digit of position, converted from 0-indexed to 1-indexed
             position = int(match.group(3))
-            site = position % 10
+            site = (position % 10) + 1
             return {
                 "well": match.group(1),
                 "sequence": f"Seq{match.group(2)}",
@@ -231,14 +232,15 @@ class FileDiscovery:
         # Pattern 4: Round 2 4-digit position format WITH crop_T1
         # WellXXX_ChannelYYY_SeqZZZZ-MaxIP_crop_T1_{WELL}_{0000-9999}_{CHANNEL}
         # Example: WellB02_Channel405,561,488,640_Seq0000-MaxIP_crop_T1_B02_0000_405
+        # Position is 0-indexed, XY is 1-indexed: 0000 -> XY1, 0007 -> XY8
         pattern_4digit_crop = (
             r"^Well([A-Z]\d+)_Channel[\d,]+_Seq(\d+)-MaxIP_crop_T1_[A-Z]\d+_(\d{4})_(\d+)$"
         )
         match = re.match(pattern_4digit_crop, filename)
         if match:
-            # Site is the last digit of position (0006 -> site 6)
+            # Site is last digit of position, converted from 0-indexed to 1-indexed
             position = int(match.group(3))
-            site = position % 10
+            site = (position % 10) + 1
             return {
                 "well": match.group(1),
                 "sequence": f"Seq{match.group(2)}",
