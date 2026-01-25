@@ -1,5 +1,32 @@
 # Edge Spot Analyser
 
+A re-implementation of the CellProfiler pipeline initially used to generate the figures in https://www.biorxiv.org/content/10.1101/2024.09.13.612963v1.
+
+The prior pipeline's spec can be found in `pipeline_files/` - this output was then analysed using `cellprofiler_output_analyser.py` in the repo root. During the revision process we needed to re-run the CellProfiler pipeline with different parameters, so it made since to port our pipeline into Python, and consolidate all the analysis work into one location.
+
+
+## Overview
+
+The original pipeline's steps were:
+- Load a set of tif files for a set of dates (including multiple well numbers per date, and multiple xy positions per well, for each channel).
+- Assign files ending in 405.tif (i.e 405nm) to the Hoechst channel (nuclear staining), and files ending in 488.tif to the MIRO160mer channel (a synthetic cargo used as a model for mitochondrial location, see paper for details).
+- Use 3-class Otsu thresholding to segment nuclei in the Hoechst channel.
+- Expand the nuclear mask by 10 pixels to define a perinuclear region.
+- Expand the nuclear mask by 15 pixels to define a mask for excluding the perinuclear region.
+- Identify 'edge spots' - bright points in the image outside the perinuclear region, using Robust Background thresholding. Measure the edge spot intensities. Count the number of such objects.
+- Measure the perinuclear region intensities (in the 10 pixel donut around each nucleus). Compute moments on the perinuclear region, calculate the Gini coefficient of the perinuclear intensities.
+- Export to spreadsheet.
+- (postprocessing, in `cellprofiler_output_analyser.py`): Generate the median Gini and `edge spot count/ nuclei count` per (Date, WellNumber, XY) and stacks them into columns for each wellnumber. From there we can generate the paper's figures for each set of conditions.
+
+
+This repo replicates the above steps, with the following differences:
+
+- A smoothing module before the Otsu step.
+- Automatically generates the necessary figures from a spreadsheet mapping condition to (date,wellnumber).
+
+
+----
+(previous README below)
 Python port of a CellProfiler pipeline for analyzing mitochondrial distribution around nuclei.
 
 ## Overview
