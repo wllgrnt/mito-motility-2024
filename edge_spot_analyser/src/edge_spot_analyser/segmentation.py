@@ -168,7 +168,15 @@ def segment_nuclei(
     sigma = params.threshold_smoothing_scale / 2.0
     smoothed = gaussian_filter(smoothed, sigma=sigma)
 
-    # Step 2: Calculate 3-class Otsu thresholds using skimage (matches CellProfiler)
+    # Step 2: Clip bright artifacts before thresholding
+    # Some images have very bright dead cells/artifacts that skew the Otsu threshold.
+    # If max intensity >> 99th percentile, clip to remove these outliers.
+    p99 = np.percentile(smoothed, 99)
+    if smoothed.max() > p99 * 3:
+        logger.debug(f"Clipping bright artifacts: max={smoothed.max():.4f}, p99={p99:.4f}")
+        smoothed = np.clip(smoothed, 0, p99 * 1.5)
+
+    # Step 3: Calculate 3-class Otsu thresholds using skimage
     # threshold_multiotsu returns array of thresholds dividing into N classes
     # For 3 classes with middle→background, we use the upper threshold (index 1)
     # CellProfiler uses 128 histogram bins by default
@@ -180,14 +188,14 @@ def segment_nuclei(
         logger.warning("3-class Otsu failed (low dynamic range), falling back to 2-class Otsu")
         threshold = filters.threshold_otsu(smoothed)
 
-    # Step 3: Apply correction factor and clip to bounds
+    # Step 4: Apply correction factor and clip to bounds
     threshold *= params.otsu_correction_factor
     threshold = np.clip(threshold, params.threshold_lower_bound, params.threshold_upper_bound)
 
-    # Step 4: Create binary mask
+    # Step 5: Create binary mask
     binary = smoothed > threshold
 
-    # Step 5: Declump using intensity-based watershed
+    # Step 6: Declump using intensity-based watershed
     # Note: Fill holes AFTER declumping (CellProfiler: "After declumping only")
     # CellProfiler auto smoothing: sigma = min_diameter / 2.35 / 2
     declump_smoothing_sigma = params.diameter_min / 4.7
@@ -198,13 +206,13 @@ def segment_nuclei(
         smoothing_sigma=declump_smoothing_sigma,
     )
 
-    # Step 6: Fill holes in each labeled object (after declumping)
+    # Step 7: Fill holes in each labeled object (after declumping)
     labels = _fill_holes_in_labels(labels)
 
-    # Step 7: Filter by size
+    # Step 8: Filter by size
     labels = _filter_objects_by_size(labels, params.size_min, params.size_max)
 
-    # Step 8: Remove border objects
+    # Step 9: Remove border objects
     if params.discard_border_objects:
         labels = segmentation.clear_border(labels)
 

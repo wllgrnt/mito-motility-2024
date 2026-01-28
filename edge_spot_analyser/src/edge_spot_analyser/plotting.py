@@ -43,8 +43,9 @@ def parse_column_name(col: str) -> ColumnInfo | None:
     Returns:
         ColumnInfo or None if parsing fails
     """
-    # Match pattern: anything_6digits_wellID (e.g., B02, G10)
-    match = re.match(r"^(.+)_(\d{6})_([A-H]\d{2})$", col)
+    # Match pattern: anything_6digits[_suffix]_wellID (e.g., B02, G10)
+    # Date can have optional suffix like 231120_1 for multiple experiments on same date
+    match = re.match(r"^(.+)_(\d{6}(?:_\d+)?)_([A-H]\d{2})$", col)
     if not match:
         return None
 
