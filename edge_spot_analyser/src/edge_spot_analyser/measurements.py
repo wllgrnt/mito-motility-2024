@@ -276,6 +276,128 @@ def _calculate_gini_on_pixels(pixels: np.ndarray) -> float:
     return gini
 
 
+def measure_peripheral_intensity(
+    masked_miro_image: np.ndarray,
+    miro_image: np.ndarray,
+    perinuclear_region_labels: np.ndarray,
+    nuclei_count: int,
+) -> dict[str, float]:
+    """
+    Calculate peripheral MIRO intensity metrics (detection-independent).
+
+    These metrics measure total MIRO in peripheral regions without requiring
+    edge spot detection. Useful for validating edge spot detection - if there's
+    high peripheral intensity but few detected spots, detection may be faulty.
+
+    Metrics:
+    - peripheral_miro_intensity_total: Sum of MIRO in peripheral regions
+    - peripheral_miro_intensity_per_nucleus: Peripheral intensity / nuclei count
+    - peripheral_fraction_of_total_miro: Peripheral intensity / total MIRO
+    - peripheral_to_perinuclear_ratio: Peripheral intensity / perinuclear intensity
+
+    Args:
+        masked_miro_image: MIRO image with perinuclear regions masked out (peripheral only)
+        miro_image: Original MIRO160mer intensity image (not masked)
+        perinuclear_region_labels: Labeled image of perinuclear ring regions
+        nuclei_count: Number of nuclei (use all nuclei count, not interior only)
+
+    Returns:
+        Dictionary with peripheral intensity metrics
+    """
+    perinuclear_mask = perinuclear_region_labels > 0
+
+    # Peripheral intensity is sum of the masked image (already has perinuclear zeroed)
+    peripheral_intensity = float(masked_miro_image.sum())
+
+    # Total MIRO intensity (from original image)
+    total_miro_intensity = float(miro_image.sum())
+
+    # Perinuclear intensity
+    perinuclear_intensity = (
+        float(miro_image[perinuclear_mask].sum()) if perinuclear_mask.any() else 0.0
+    )
+
+    # Calculate metrics
+    peripheral_intensity_per_nucleus = (
+        peripheral_intensity / nuclei_count if nuclei_count > 0 else 0.0
+    )
+
+    peripheral_fraction_of_total_miro = (
+        peripheral_intensity / total_miro_intensity if total_miro_intensity > 0 else 0.0
+    )
+
+    peripheral_to_perinuclear_ratio = (
+        peripheral_intensity / perinuclear_intensity if perinuclear_intensity > 0 else 0.0
+    )
+
+    return {
+        "peripheral_miro_intensity_total": peripheral_intensity,
+        "peripheral_miro_intensity_per_nucleus": peripheral_intensity_per_nucleus,
+        "peripheral_fraction_of_total_miro": peripheral_fraction_of_total_miro,
+        "peripheral_to_perinuclear_ratio": peripheral_to_perinuclear_ratio,
+    }
+
+
+def measure_edge_spot_burden(
+    edge_spots_labels: np.ndarray,
+    miro_image: np.ndarray,
+    perinuclear_region_labels: np.ndarray,
+    nuclei_count: int,
+) -> dict[str, float]:
+    """
+    Calculate intensity-based edge spot metrics (detection-dependent).
+
+    These metrics capture cargo accumulation at cell edges more accurately than
+    simple edge spot count / nuclei count.
+
+    Metrics:
+    - edge_spot_intensity_total: Sum of MIRO intensity in all edge spots
+    - edge_spot_intensity_per_nucleus: Total edge spot intensity / nuclei count
+    - edge_fraction_of_total_miro: Edge spot intensity / total MIRO intensity
+    - edge_to_perinuclear_ratio: Edge spot intensity / perinuclear intensity
+
+    Args:
+        edge_spots_labels: Labeled image of detected edge spots
+        miro_image: Original MIRO160mer intensity image (not masked)
+        perinuclear_region_labels: Labeled image of perinuclear ring regions
+        nuclei_count: Number of nuclei (use all nuclei count, not interior only)
+
+    Returns:
+        Dictionary with edge spot burden metrics
+    """
+    edge_mask = edge_spots_labels > 0
+    perinuclear_mask = perinuclear_region_labels > 0
+
+    # Calculate edge spot intensity
+    edge_intensity = float(miro_image[edge_mask].sum()) if edge_mask.any() else 0.0
+
+    # Calculate total MIRO intensity
+    total_miro_intensity = float(miro_image.sum())
+
+    # Calculate perinuclear intensity
+    perinuclear_intensity = (
+        float(miro_image[perinuclear_mask].sum()) if perinuclear_mask.any() else 0.0
+    )
+
+    # Calculate metrics
+    edge_spot_intensity_per_nucleus = edge_intensity / nuclei_count if nuclei_count > 0 else 0.0
+
+    edge_fraction_of_total_miro = (
+        edge_intensity / total_miro_intensity if total_miro_intensity > 0 else 0.0
+    )
+
+    edge_to_perinuclear_ratio = (
+        edge_intensity / perinuclear_intensity if perinuclear_intensity > 0 else 0.0
+    )
+
+    return {
+        "edge_spot_intensity_total": edge_intensity,
+        "edge_spot_intensity_per_nucleus": edge_spot_intensity_per_nucleus,
+        "edge_fraction_of_total_miro": edge_fraction_of_total_miro,
+        "edge_to_perinuclear_ratio": edge_to_perinuclear_ratio,
+    }
+
+
 class ImageMeasurements:
     """Calculate image-level (global) intensity statistics."""
 
@@ -409,6 +531,8 @@ def combine_measurements_for_export(
     miro_image: np.ndarray,
     metadata: dict[str, Any],
     masked_miro_image: np.ndarray | None = None,
+    nuclei_count_all: int | None = None,
+    nuclei_count_interior: int | None = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Combine all measurements into CellProfiler-compatible DataFrames.
@@ -417,7 +541,7 @@ def combine_measurements_for_export(
     same structure as CellProfiler's CSV outputs.
 
     Args:
-        nuclei_labels: Labeled nuclei
+        nuclei_labels: Labeled nuclei (interior only, for Gini/dispersion metrics)
         expand_nuclei_labels: Expanded nuclei (10px)
         perinuclear_region_labels: Perinuclear ring region
         edge_spots_labels: Detected edge spots
@@ -426,6 +550,10 @@ def combine_measurements_for_export(
         metadata: Dictionary with 'ImageNumber', 'FileName_Hoechst', etc.
         masked_miro_image: Masked MIRO160mer image for edge_spots measurements
             (Subtract_perinucleus_Miro160mer in CellProfiler). If None, uses miro_image.
+        nuclei_count_all: Total nuclei count including border nuclei (for edge spot metrics).
+            If None, uses nuclei_labels.max().
+        nuclei_count_interior: Interior nuclei count (border nuclei removed).
+            If None, uses nuclei_labels.max().
 
     Returns:
         Dictionary mapping output names to DataFrames:
@@ -433,11 +561,19 @@ def combine_measurements_for_export(
         - 'Expand_Nuclei': Expanded nuclei measurements (with Gini, moments, etc.)
         - 'Perinuclear_region': Perinuclear region measurements
         - 'edge_spots': Edge spot measurements (if any)
-        - 'Image': Image-level statistics
+        - 'Image': Image-level statistics (including edge spot burden metrics)
     """
     # Use masked image for edge_spots if provided, otherwise fall back to miro_image
     edge_spots_miro = masked_miro_image if masked_miro_image is not None else miro_image
     results = {}
+
+    # Determine nuclei counts
+    # nuclei_count_all: all nuclei including border (for edge spot fraction denominator)
+    # nuclei_count_interior: interior nuclei only (for Gini normalization)
+    if nuclei_count_all is None:
+        nuclei_count_all = nuclei_labels.max()
+    if nuclei_count_interior is None:
+        nuclei_count_interior = nuclei_labels.max()
 
     # Image metadata columns
     image_cols = {
@@ -538,8 +674,41 @@ def combine_measurements_for_export(
         k.replace("Image_Intensity", "Image_Intensity_MIRO160mer"): v for k, v in miro_meas.items()
     }
 
-    # Combine
-    image_df = pd.DataFrame([{**image_cols, **image_meas_hoechst, **image_meas_miro}])
+    # 6. Peripheral intensity metrics (detection-independent)
+    peripheral_intensity = measure_peripheral_intensity(
+        masked_miro_image=edge_spots_miro,  # This is the masked MIRO (peripheral only)
+        miro_image=miro_image,
+        perinuclear_region_labels=perinuclear_region_labels,
+        nuclei_count=nuclei_count_all,
+    )
+
+    # 7. Edge spot burden metrics (detection-dependent)
+    edge_burden = measure_edge_spot_burden(
+        edge_spots_labels=edge_spots_labels,
+        miro_image=miro_image,
+        perinuclear_region_labels=perinuclear_region_labels,
+        nuclei_count=nuclei_count_all,  # Use all nuclei for denominator
+    )
+
+    # Add nuclei counts to image measurements
+    nuclei_counts = {
+        "Count_Nuclei_All": nuclei_count_all,
+        "Count_Nuclei_Interior": nuclei_count_interior,
+    }
+
+    # Combine all image-level measurements
+    image_df = pd.DataFrame(
+        [
+            {
+                **image_cols,
+                **image_meas_hoechst,
+                **image_meas_miro,
+                **peripheral_intensity,
+                **edge_burden,
+                **nuclei_counts,
+            }
+        ]
+    )
     results["Image"] = image_df
 
     return results

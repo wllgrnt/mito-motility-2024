@@ -120,7 +120,7 @@ class Aggregator:
             self._generate_edge_spot_static_files(processed_df, output_dir)
 
     def _extract_edgespot_cols(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract well number, XY, T and aggregate to get edge spot fraction."""
+        """Extract well number, XY, T and aggregate to get edge spot fraction and burden metrics."""
         logger.info(f"Extracting edge spot columns, input shape {df.shape}")
 
         filename_column = "FileName_Hoechst"
@@ -136,7 +136,39 @@ class Aggregator:
         output_df["nuclei_count"] = output_df["Nuclei"][nuclei_count_column]
         output_df["edge_spot_count"] = output_df["edge_spots"][edge_spot_count_column]
 
+        # Extract peripheral intensity metrics (detection-independent)
+        peripheral_cols = [
+            "intensity_total",
+            "intensity_per_nucleus",
+            "fraction_of_total_miro",
+            "to_perinuclear_ratio",
+        ]
+        for col in peripheral_cols:
+            if ("peripheral", col) in df.columns:
+                output_df[f"peripheral_{col}"] = df["peripheral"][col]
+
+        # Extract edge spot burden metrics (detection-dependent)
+        burden_cols = [
+            "intensity_total",
+            "intensity_per_nucleus",
+            "fraction_of_total_miro",
+            "to_perinuclear_ratio",
+        ]
+        for col in burden_cols:
+            if ("edge_spots", col) in df.columns:
+                output_df[f"edge_spot_{col}"] = df["edge_spots"][col]
+
         cols = ["WellNumber", "XY", "nuclei_count", "edge_spot_count"]
+        # Add peripheral metric columns if present
+        for col in peripheral_cols:
+            col_name = f"peripheral_{col}"
+            if col_name in output_df.columns:
+                cols.append(col_name)
+        # Add edge spot burden metric columns if present
+        for col in burden_cols:
+            col_name = f"edge_spot_{col}"
+            if col_name in output_df.columns:
+                cols.append(col_name)
         if self.config.t_varies:
             cols.append("T")
 
@@ -184,8 +216,83 @@ class Aggregator:
         if self.config.plot:
             self._plot_time_series(pivot, "Edge spot fraction over time, normalised to T0")
 
+        # Generate time files for peripheral intensity metrics (detection-independent)
+        peripheral_metrics = [
+            ("peripheral_intensity_per_nucleus", "peripheral_intensity_per_nucleus"),
+            ("peripheral_fraction_of_total_miro", "peripheral_fraction_of_total_miro"),
+            ("peripheral_to_perinuclear_ratio", "peripheral_to_perinuclear_ratio"),
+        ]
+        for col_name, file_prefix in peripheral_metrics:
+            if col_name not in df.columns:
+                continue
+
+            # Per-well files
+            for well_number in df.WellNumber.unique():
+                well_df = df[df.WellNumber == well_number]
+                output_path = output_dir / f"{file_prefix}_over_time_{well_number}.csv"
+                self._save_pivot_table(
+                    data=well_df,
+                    values=col_name,
+                    index="XY",
+                    columns="T",
+                    output_path=output_path,
+                )
+
+            # Normalized time-course
+            avg_over_time = df.groupby(["WellNumber", "T"])[col_name].mean().reset_index()
+            pivot = pd.pivot_table(
+                data=avg_over_time,
+                values=col_name,
+                index="T",
+                columns="WellNumber",
+            )
+            # Only normalize if first row has non-zero values
+            if (pivot.iloc[0] != 0).all():
+                pivot = pivot.divide(pivot.iloc[0])
+            output_path = output_dir / f"{file_prefix}_mean_over_time_normalised.csv"
+            logger.info(f"Writing normalised pivot table to {output_path}")
+            pivot.to_csv(output_path)
+
+        # Generate time files for edge spot burden metrics (detection-dependent)
+        burden_metrics = [
+            ("edge_spot_intensity_per_nucleus", "edge_spot_intensity_per_nucleus"),
+            ("edge_spot_fraction_of_total_miro", "edge_spot_fraction_of_total_miro"),
+            ("edge_spot_to_perinuclear_ratio", "edge_spot_to_perinuclear_ratio"),
+        ]
+        for col_name, file_prefix in burden_metrics:
+            if col_name not in df.columns:
+                continue
+
+            # Per-well files
+            for well_number in df.WellNumber.unique():
+                well_df = df[df.WellNumber == well_number]
+                output_path = output_dir / f"{file_prefix}_over_time_{well_number}.csv"
+                self._save_pivot_table(
+                    data=well_df,
+                    values=col_name,
+                    index="XY",
+                    columns="T",
+                    output_path=output_path,
+                )
+
+            # Normalized time-course
+            avg_over_time = df.groupby(["WellNumber", "T"])[col_name].mean().reset_index()
+            pivot = pd.pivot_table(
+                data=avg_over_time,
+                values=col_name,
+                index="T",
+                columns="WellNumber",
+            )
+            # Only normalize if first row has non-zero values
+            if (pivot.iloc[0] != 0).all():
+                pivot = pivot.divide(pivot.iloc[0])
+            output_path = output_dir / f"{file_prefix}_mean_over_time_normalised.csv"
+            logger.info(f"Writing normalised pivot table to {output_path}")
+            pivot.to_csv(output_path)
+
     def _generate_edge_spot_static_files(self, df: pd.DataFrame, output_dir: Path) -> None:
         """Generate static (single timepoint) edge spot files."""
+        # Original edge spot fraction
         output_path = output_dir / "edge_spot_fraction_static.csv"
         self._save_pivot_table(
             data=df,
@@ -194,6 +301,40 @@ class Aggregator:
             columns="WellNumber",
             output_path=output_path,
         )
+
+        # Generate files for peripheral intensity metrics (detection-independent)
+        peripheral_metrics = [
+            ("peripheral_intensity_per_nucleus", "peripheral_intensity_per_nucleus_static.csv"),
+            ("peripheral_fraction_of_total_miro", "peripheral_fraction_of_total_miro_static.csv"),
+            ("peripheral_to_perinuclear_ratio", "peripheral_to_perinuclear_ratio_static.csv"),
+        ]
+        for col_name, filename in peripheral_metrics:
+            if col_name in df.columns:
+                output_path = output_dir / filename
+                self._save_pivot_table(
+                    data=df,
+                    values=col_name,
+                    index="XY",
+                    columns="WellNumber",
+                    output_path=output_path,
+                )
+
+        # Generate files for edge spot burden metrics (detection-dependent)
+        burden_metrics = [
+            ("edge_spot_intensity_per_nucleus", "edge_spot_intensity_per_nucleus_static.csv"),
+            ("edge_spot_fraction_of_total_miro", "edge_spot_fraction_of_total_miro_static.csv"),
+            ("edge_spot_to_perinuclear_ratio", "edge_spot_to_perinuclear_ratio_static.csv"),
+        ]
+        for col_name, filename in burden_metrics:
+            if col_name in df.columns:
+                output_path = output_dir / filename
+                self._save_pivot_table(
+                    data=df,
+                    values=col_name,
+                    index="XY",
+                    columns="WellNumber",
+                    output_path=output_path,
+                )
 
     def _process_mass_displacement(self, input_path: Path, output_dir: Path) -> None:
         """Process mass displacement data."""

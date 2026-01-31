@@ -222,6 +222,45 @@ def segment_nuclei(
     return labels
 
 
+def segment_nuclei_keep_border(
+    hoechst_image: np.ndarray, params: NucleiSegmentationParams | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Segment nuclei and return both all-nuclei and interior-only label arrays.
+
+    This function is used to fix the border nuclei masking bug:
+    - nuclei_labels_all: ALL nuclei including those touching the border
+      (used for creating perinuclear mask - ensures spots near border nuclei are masked)
+    - nuclei_labels_interior: Only nuclei not touching the border
+      (used for Gini analysis - truncated perinuclear rings are problematic)
+
+    Args:
+        hoechst_image: 2D float array (0-1 normalized) of Hoechst/nuclear channel
+        params: Segmentation parameters (uses defaults if None)
+
+    Returns:
+        Tuple of (nuclei_labels_all, nuclei_labels_interior)
+    """
+    if params is None:
+        params = NucleiSegmentationParams()
+
+    # Temporarily disable border object discarding to get all nuclei
+    original_discard = params.discard_border_objects
+    params.discard_border_objects = False
+
+    # Get all nuclei (including border)
+    nuclei_labels_all = segment_nuclei(hoechst_image, params)
+
+    # Restore original setting
+    params.discard_border_objects = original_discard
+
+    # Create interior-only version by removing border objects
+    nuclei_labels_interior = segmentation.clear_border(nuclei_labels_all)
+    nuclei_labels_interior = measure.label(nuclei_labels_interior > 0)
+
+    return nuclei_labels_all, nuclei_labels_interior
+
+
 def _declump_objects_watershed(
     binary_mask: np.ndarray,
     intensity_image: np.ndarray,

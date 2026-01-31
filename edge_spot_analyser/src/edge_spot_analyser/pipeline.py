@@ -46,7 +46,7 @@ from edge_spot_analyser.segmentation import (
     detect_edge_spots,
     filter_edge_spots_by_edge_intensity,
     mask_peripheral_regions,
-    segment_nuclei,
+    segment_nuclei_keep_border,
     smooth_image,
 )
 
@@ -75,11 +75,17 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
         if smooth_params is not None:
             hoechst = smooth_image(hoechst, smooth_params)
 
-        # Segment nuclei
-        nuclei_labels = segment_nuclei(hoechst, nuclei_params)
-        n_nuclei = nuclei_labels.max()
+        # Segment nuclei - get both all-nuclei and interior-only versions
+        # This fixes the border nuclei masking bug: we use ALL nuclei for masking
+        # (so spots near border nuclei are properly excluded), but only interior
+        # nuclei for Gini analysis (where truncated perinuclear rings are problematic)
+        nuclei_labels_all, nuclei_labels_interior = segment_nuclei_keep_border(
+            hoechst, nuclei_params
+        )
+        n_nuclei_all = nuclei_labels_all.max()
+        n_nuclei_interior = nuclei_labels_interior.max()
 
-        if n_nuclei == 0:
+        if n_nuclei_all == 0:
             metadata = image_pair.to_metadata_dict(image_number)
             return {
                 "image_id": image_pair.image_id,
@@ -92,15 +98,17 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
                 },
             }
 
-        # Create perinuclear regions
-        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = create_perinuclear_regions(
-            nuclei_labels, perinuclear_params
+        # Create perinuclear regions using ALL nuclei (including border)
+        # This ensures spots near border nuclei are masked out
+        expand_nuclei_10px_all, expand_nuclei_15px_all, _ = create_perinuclear_regions(
+            nuclei_labels_all, perinuclear_params
         )
 
-        # Mask peripheral regions
-        masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px)
+        # Mask peripheral regions using ALL nuclei expansion
+        # Centrosomal spots near border nuclei are now properly masked
+        masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px_all)
 
-        # Detect edge spots
+        # Detect edge spots on the properly masked MIRO
         edge_spots_labels = detect_edge_spots(masked_miro, edge_spot_params)
         n_edge_spots = edge_spots_labels.max()
 
@@ -111,10 +119,16 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
                 edge_spots_labels, masked_miro, min_edge_intensity=0.0, max_edge_intensity=1.0
             )
 
-        # Measure properties
+        # Create perinuclear regions for INTERIOR nuclei only (for Gini analysis)
+        # Truncated perinuclear rings at borders are problematic for Gini calculation
+        expand_nuclei_10px, _, perinuclear_ring = create_perinuclear_regions(
+            nuclei_labels_interior, perinuclear_params
+        )
+
+        # Measure properties using interior nuclei for Gini/dispersion metrics
         metadata = image_pair.to_metadata_dict(image_number)
         measurements = combine_measurements_for_export(
-            nuclei_labels=nuclei_labels,
+            nuclei_labels=nuclei_labels_interior,
             expand_nuclei_labels=expand_nuclei_10px,
             perinuclear_region_labels=perinuclear_ring,
             edge_spots_labels=edge_spots_labels,
@@ -122,12 +136,14 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
             miro_image=miro,
             masked_miro_image=masked_miro,  # For edge_spots measurements (Module 12)
             metadata=metadata,
+            nuclei_count_all=n_nuclei_all,
+            nuclei_count_interior=n_nuclei_interior,
         )
 
         return {
             "image_id": image_pair.image_id,
             "measurements": measurements,
-            "n_nuclei": n_nuclei,
+            "n_nuclei": n_nuclei_all,
             "n_edge_spots": edge_spots_labels.max(),
         }
 
@@ -183,24 +199,30 @@ class Pipeline:
             hoechst = smooth_image(hoechst, self.smooth_params)
 
         # Step 1: Segment nuclei (Module 7)
+        # Get both all-nuclei and interior-only versions to fix border masking bug
         logger.debug("  Segmenting nuclei...")
-        nuclei_labels = segment_nuclei(hoechst, self.nuclei_params)
-        n_nuclei = nuclei_labels.max()
-        logger.debug(f"  Found {n_nuclei} nuclei")
+        nuclei_labels_all, nuclei_labels_interior = segment_nuclei_keep_border(
+            hoechst, self.nuclei_params
+        )
+        n_nuclei_all = nuclei_labels_all.max()
+        n_nuclei_interior = nuclei_labels_interior.max()
+        logger.debug(f"  Found {n_nuclei_all} nuclei ({n_nuclei_interior} interior)")
 
-        if n_nuclei == 0:
+        if n_nuclei_all == 0:
             logger.warning(f"  No nuclei found in {image_pair.image_id}, skipping")
             return self._empty_measurements(image_pair, image_number)
 
-        # Step 2: Create perinuclear regions (Modules 8-10, 14)
-        logger.debug("  Creating perinuclear regions...")
-        expand_nuclei_10px, expand_nuclei_15px, perinuclear_ring = create_perinuclear_regions(
-            nuclei_labels, self.perinuclear_params
+        # Step 2: Create perinuclear regions using ALL nuclei (including border)
+        # This ensures spots near border nuclei are properly masked out
+        logger.debug("  Creating perinuclear regions (all nuclei for masking)...")
+        expand_nuclei_10px_all, expand_nuclei_15px_all, _ = create_perinuclear_regions(
+            nuclei_labels_all, self.perinuclear_params
         )
 
-        # Step 3: Mask peripheral regions (Module 10)
+        # Step 3: Mask peripheral regions using ALL nuclei (Module 10)
+        # Centrosomal spots near border nuclei are now properly masked
         logger.debug("  Masking peripheral regions...")
-        masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px)
+        masked_miro = mask_peripheral_regions(miro, expand_nuclei_15px_all)
 
         # Step 4: Detect edge spots (Module 11)
         logger.debug("  Detecting edge spots...")
@@ -221,12 +243,19 @@ class Pipeline:
             n_edge_spots_filtered = edge_spots_labels.max()
             logger.debug(f"  {n_edge_spots_filtered} spots after filtering")
 
-        # Step 6: Measure all properties (Modules 12-20)
+        # Step 6: Create perinuclear regions for INTERIOR nuclei only (for Gini)
+        # Truncated perinuclear rings at borders are problematic for Gini calculation
+        logger.debug("  Creating perinuclear regions (interior nuclei for Gini)...")
+        expand_nuclei_10px, _, perinuclear_ring = create_perinuclear_regions(
+            nuclei_labels_interior, self.perinuclear_params
+        )
+
+        # Step 7: Measure all properties (Modules 12-20)
         logger.debug("  Measuring properties...")
         metadata = image_pair.to_metadata_dict(image_number)
 
         measurements = combine_measurements_for_export(
-            nuclei_labels=nuclei_labels,
+            nuclei_labels=nuclei_labels_interior,
             expand_nuclei_labels=expand_nuclei_10px,
             perinuclear_region_labels=perinuclear_ring,
             edge_spots_labels=edge_spots_labels,
@@ -234,9 +263,11 @@ class Pipeline:
             miro_image=miro,
             masked_miro_image=masked_miro,  # For edge_spots measurements (Module 12)
             metadata=metadata,
+            nuclei_count_all=n_nuclei_all,
+            nuclei_count_interior=n_nuclei_interior,
         )
 
-        logger.info(f"  Complete: {n_nuclei} nuclei, {edge_spots_labels.max()} edge spots")
+        logger.info(f"  Complete: {n_nuclei_all} nuclei, {edge_spots_labels.max()} edge spots")
 
         return measurements
 
