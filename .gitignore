@@ -1,5 +1,7 @@
 archive/
 inputs/
+*.zip
+*.log
 
 # Python
 __pycache__/

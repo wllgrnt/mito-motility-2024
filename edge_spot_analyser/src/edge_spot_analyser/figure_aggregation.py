@@ -15,6 +15,31 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+# Metrics to process: (metric_name, source_filename)
+# Detection-independent metrics (peripheral)
+PERIPHERAL_METRICS = [
+    ("peripheral_intensity_per_nucleus", "peripheral_intensity_per_nucleus_static.csv"),
+    ("peripheral_fraction_of_total_miro", "peripheral_fraction_of_total_miro_static.csv"),
+    ("peripheral_to_perinuclear_ratio", "peripheral_to_perinuclear_ratio_static.csv"),
+]
+
+# Detection-dependent metrics (edge spots)
+EDGE_SPOT_METRICS = [
+    ("edge_spot_fraction", "edge_spot_fraction_static.csv"),
+    ("edge_spot_intensity_per_nucleus", "edge_spot_intensity_per_nucleus_static.csv"),
+    ("edge_spot_fraction_of_total_miro", "edge_spot_fraction_of_total_miro_static.csv"),
+    ("edge_spot_to_perinuclear_ratio", "edge_spot_to_perinuclear_ratio_static.csv"),
+]
+
+# Other metrics
+OTHER_METRICS = [
+    ("gini", "GINI_Gini_MIRO160mer_fov_median_static.csv"),
+]
+
+# All metrics combined
+ALL_METRICS = PERIPHERAL_METRICS + EDGE_SPOT_METRICS + OTHER_METRICS
+
+
 class FigureAggregator:
     """Aggregate data across dates/wells for figure generation."""
 
@@ -87,9 +112,10 @@ class FigureAggregator:
 
         logger.info(f"Conditions: {conditions}")
 
-        # Build data for edge spot fraction and Gini
-        edge_spot_data = {}
-        gini_data = {}
+        # Build data for each metric
+        metric_data: dict[str, dict[str, pd.Series]] = {
+            metric_name: {} for metric_name, _ in ALL_METRICS
+        }
 
         for _, row in fig_df.iterrows():
             date_val = row[date_col]
@@ -113,30 +139,18 @@ class FigureAggregator:
                 for well in wells:
                     col_name = f"{self._sanitize_name(condition)}_{date_str}_{well}"
 
-                    # Try to load edge spot fraction data
-                    edge_spot_col = self._load_well_data(
-                        date_str, well, "edge_spot_fraction_static.csv"
-                    )
-                    if edge_spot_col is not None:
-                        edge_spot_data[col_name] = edge_spot_col
+                    # Try to load each metric
+                    for metric_name, filename in ALL_METRICS:
+                        col_data = self._load_well_data(date_str, well, filename)
+                        if col_data is not None:
+                            metric_data[metric_name][col_name] = col_data
 
-                    # Try to load Gini data
-                    gini_col = self._load_well_data(
-                        date_str, well, "GINI_Gini_MIRO160mer_fov_median_static.csv"
-                    )
-                    if gini_col is not None:
-                        gini_data[col_name] = gini_col
-
-        # Create DataFrames and save
-        if edge_spot_data:
-            self._save_figure_outputs(edge_spot_data, sheet_name, "edge_spot", conditions)
-        else:
-            logger.warning(f"No edge spot data found for {sheet_name}")
-
-        if gini_data:
-            self._save_figure_outputs(gini_data, sheet_name, "gini", conditions)
-        else:
-            logger.warning(f"No Gini data found for {sheet_name}")
+        # Create DataFrames and save for each metric
+        for metric_name, data in metric_data.items():
+            if data:
+                self._save_figure_outputs(data, sheet_name, metric_name, conditions)
+            else:
+                logger.debug(f"No {metric_name} data found for {sheet_name}")
 
     def _load_well_data(self, date_str: str, well: str, filename: str) -> pd.Series | None:
         """
