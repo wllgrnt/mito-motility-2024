@@ -45,6 +45,7 @@ from edge_spot_analyser.segmentation import (
     create_perinuclear_regions,
     detect_edge_spots,
     filter_edge_spots_by_edge_intensity,
+    filter_edge_spots_by_nuclei_proximity,
     mask_peripheral_regions,
     segment_nuclei_keep_border,
     smooth_image,
@@ -117,6 +118,13 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
         if n_edge_spots > 0:
             edge_spots_labels = filter_edge_spots_by_edge_intensity(
                 edge_spots_labels, masked_miro, min_edge_intensity=0.0, max_edge_intensity=1.0
+            )
+
+            # Filter by nuclei proximity - remove spots too close to perinuclear region
+            edge_spots_labels = filter_edge_spots_by_nuclei_proximity(
+                edge_spots_labels,
+                expand_nuclei_15px_all,
+                expansion_radius=3,
             )
 
         # Create perinuclear regions for INTERIOR nuclei only (for Gini analysis)
@@ -241,7 +249,17 @@ class Pipeline:
                 max_edge_intensity=1.0,
             )
             n_edge_spots_filtered = edge_spots_labels.max()
-            logger.debug(f"  {n_edge_spots_filtered} spots after filtering")
+            logger.debug(f"  {n_edge_spots_filtered} spots after edge intensity filter")
+
+            # Filter by nuclei proximity - remove spots too close to perinuclear region
+            logger.debug("  Filtering edge spots by nuclei proximity...")
+            edge_spots_labels = filter_edge_spots_by_nuclei_proximity(
+                edge_spots_labels,
+                expand_nuclei_15px_all,
+                expansion_radius=3,
+            )
+            n_edge_spots_proximity = edge_spots_labels.max()
+            logger.debug(f"  {n_edge_spots_proximity} spots after nuclei proximity filter")
 
         # Step 6: Create perinuclear regions for INTERIOR nuclei only (for Gini)
         # Truncated perinuclear rings at borders are problematic for Gini calculation

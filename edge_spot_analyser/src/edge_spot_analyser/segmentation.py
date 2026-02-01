@@ -98,11 +98,11 @@ class NucleiSegmentationParams:
 class EdgeSpotParams:
     """Parameters for edge spot detection (Module 11)."""
 
-    diameter_min: int = 5  # Minimum spot diameter in pixels
+    diameter_min: int = 3  # Minimum spot diameter in pixels (reduced from 5 for sensitivity)
     diameter_max: int = 80  # Maximum spot diameter in pixels
     lower_outlier_fraction: float = 0.3  # Fraction of lowest pixels to remove
     upper_outlier_fraction: float = 0.1  # Fraction of highest pixels to remove
-    num_deviations: float = 6.0  # Number of standard deviations above robust mean
+    num_deviations: float = 2.0  # Number of std devs above robust mean (reduced from 6.0)
     correction_factor: float = 2.0  # Multiplier applied to calculated threshold
     threshold_lower_bound: float = 0.0035  # Absolute minimum threshold
     threshold_smoothing: float = 1.3  # Gaussian smoothing applied to image before thresholding
@@ -631,3 +631,43 @@ def filter_edge_spots_by_edge_intensity(
     filtered = measure.label(filtered > 0)
 
     return filtered
+
+
+def filter_edge_spots_by_nuclei_proximity(
+    edge_spots_labels: np.ndarray,
+    expand_nuclei_mask: np.ndarray,
+    expansion_radius: int = 3,
+) -> np.ndarray:
+    """
+    Expand edge spots and exclude any that touch the expanded nuclei mask.
+
+    This filters out spots that are too close to the perinuclear region,
+    which are likely centrosomal rather than true peripheral spots.
+
+    Args:
+        edge_spots_labels: Labeled image of detected edge spots
+        expand_nuclei_mask: Binary mask of expanded nuclei (15px expansion)
+        expansion_radius: Pixels to expand each edge spot before checking overlap
+
+    Returns:
+        Filtered labeled image with perinuclear-adjacent spots removed
+    """
+    if edge_spots_labels.max() == 0:
+        return edge_spots_labels
+
+    filtered = np.zeros_like(edge_spots_labels)
+
+    for region in measure.regionprops(edge_spots_labels):
+        # Get object mask
+        mask = edge_spots_labels == region.label
+
+        # Expand by expansion_radius
+        expanded = morphology.binary_dilation(mask, morphology.disk(expansion_radius))
+
+        # Check if expanded spot touches nuclei mask
+        if not np.any(expanded & (expand_nuclei_mask > 0)):
+            # Keep this spot (doesn't touch nuclei)
+            filtered[mask] = region.label
+
+    # Relabel consecutively
+    return measure.label(filtered > 0)

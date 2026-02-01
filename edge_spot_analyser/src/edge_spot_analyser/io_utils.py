@@ -468,16 +468,6 @@ class CSVExporter:
             nuclei_count_all = img_row.get("Count_Nuclei_All", nuclei_count)
             nuclei_count_interior = img_row.get("Count_Nuclei_Interior", nuclei_count)
 
-            # Get peripheral intensity metrics (detection-independent)
-            peripheral_intensity_total = img_row.get("peripheral_miro_intensity_total", 0.0)
-            peripheral_intensity_per_nucleus = img_row.get(
-                "peripheral_miro_intensity_per_nucleus", 0.0
-            )
-            peripheral_fraction_of_total_miro = img_row.get(
-                "peripheral_fraction_of_total_miro", 0.0
-            )
-            peripheral_to_perinuclear_ratio = img_row.get("peripheral_to_perinuclear_ratio", 0.0)
-
             # Get edge spot burden metrics (detection-dependent)
             edge_spot_intensity_total = img_row.get("edge_spot_intensity_total", 0.0)
             edge_spot_intensity_per_nucleus = img_row.get("edge_spot_intensity_per_nucleus", 0.0)
@@ -491,11 +481,6 @@ class CSVExporter:
                     ("Image", "FileName_MIRO160mer"): img_row.get("FileName_MIRO160mer", ""),
                     ("Nuclei", "Number_Object_Number"): nuclei_count_all,
                     ("Nuclei", "Count_Interior"): nuclei_count_interior,
-                    # Peripheral intensity metrics (detection-independent)
-                    ("peripheral", "intensity_total"): peripheral_intensity_total,
-                    ("peripheral", "intensity_per_nucleus"): peripheral_intensity_per_nucleus,
-                    ("peripheral", "fraction_of_total_miro"): peripheral_fraction_of_total_miro,
-                    ("peripheral", "to_perinuclear_ratio"): peripheral_to_perinuclear_ratio,
                     # Edge spot metrics (detection-dependent)
                     ("edge_spots", "Number_Object_Number"): edge_spot_count,
                     ("edge_spots", "intensity_total"): edge_spot_intensity_total,

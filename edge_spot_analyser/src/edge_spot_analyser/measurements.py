@@ -276,68 +276,6 @@ def _calculate_gini_on_pixels(pixels: np.ndarray) -> float:
     return gini
 
 
-def measure_peripheral_intensity(
-    masked_miro_image: np.ndarray,
-    miro_image: np.ndarray,
-    perinuclear_region_labels: np.ndarray,
-    nuclei_count: int,
-) -> dict[str, float]:
-    """
-    Calculate peripheral MIRO intensity metrics (detection-independent).
-
-    These metrics measure total MIRO in peripheral regions without requiring
-    edge spot detection. Useful for validating edge spot detection - if there's
-    high peripheral intensity but few detected spots, detection may be faulty.
-
-    Metrics:
-    - peripheral_miro_intensity_total: Sum of MIRO in peripheral regions
-    - peripheral_miro_intensity_per_nucleus: Peripheral intensity / nuclei count
-    - peripheral_fraction_of_total_miro: Peripheral intensity / total MIRO
-    - peripheral_to_perinuclear_ratio: Peripheral intensity / perinuclear intensity
-
-    Args:
-        masked_miro_image: MIRO image with perinuclear regions masked out (peripheral only)
-        miro_image: Original MIRO160mer intensity image (not masked)
-        perinuclear_region_labels: Labeled image of perinuclear ring regions
-        nuclei_count: Number of nuclei (use all nuclei count, not interior only)
-
-    Returns:
-        Dictionary with peripheral intensity metrics
-    """
-    perinuclear_mask = perinuclear_region_labels > 0
-
-    # Peripheral intensity is sum of the masked image (already has perinuclear zeroed)
-    peripheral_intensity = float(masked_miro_image.sum())
-
-    # Total MIRO intensity (from original image)
-    total_miro_intensity = float(miro_image.sum())
-
-    # Perinuclear intensity
-    perinuclear_intensity = (
-        float(miro_image[perinuclear_mask].sum()) if perinuclear_mask.any() else 0.0
-    )
-
-    # Calculate metrics
-    peripheral_intensity_per_nucleus = (
-        peripheral_intensity / nuclei_count if nuclei_count > 0 else 0.0
-    )
-
-    peripheral_fraction_of_total_miro = (
-        peripheral_intensity / total_miro_intensity if total_miro_intensity > 0 else 0.0
-    )
-
-    peripheral_to_perinuclear_ratio = (
-        peripheral_intensity / perinuclear_intensity if perinuclear_intensity > 0 else 0.0
-    )
-
-    return {
-        "peripheral_miro_intensity_total": peripheral_intensity,
-        "peripheral_miro_intensity_per_nucleus": peripheral_intensity_per_nucleus,
-        "peripheral_fraction_of_total_miro": peripheral_fraction_of_total_miro,
-        "peripheral_to_perinuclear_ratio": peripheral_to_perinuclear_ratio,
-    }
-
-
 def measure_edge_spot_burden(
     edge_spots_labels: np.ndarray,
     miro_image: np.ndarray,
@@ -674,15 +612,7 @@ def combine_measurements_for_export(
         k.replace("Image_Intensity", "Image_Intensity_MIRO160mer"): v for k, v in miro_meas.items()
     }
 
-    # 6. Peripheral intensity metrics (detection-independent)
-    peripheral_intensity = measure_peripheral_intensity(
-        masked_miro_image=edge_spots_miro,  # This is the masked MIRO (peripheral only)
-        miro_image=miro_image,
-        perinuclear_region_labels=perinuclear_region_labels,
-        nuclei_count=nuclei_count_all,
-    )
-
-    # 7. Edge spot burden metrics (detection-dependent)
+    # 6. Edge spot burden metrics (detection-dependent)
     edge_burden = measure_edge_spot_burden(
         edge_spots_labels=edge_spots_labels,
         miro_image=miro_image,
@@ -703,7 +633,6 @@ def combine_measurements_for_export(
                 **image_cols,
                 **image_meas_hoechst,
                 **image_meas_miro,
-                **peripheral_intensity,
                 **edge_burden,
                 **nuclei_counts,
             }

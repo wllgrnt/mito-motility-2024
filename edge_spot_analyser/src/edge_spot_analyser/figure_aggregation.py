@@ -16,13 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 # Metrics to process: (metric_name, source_filename)
-# Detection-independent metrics (peripheral)
-PERIPHERAL_METRICS = [
-    ("peripheral_intensity_per_nucleus", "peripheral_intensity_per_nucleus_static.csv"),
-    ("peripheral_fraction_of_total_miro", "peripheral_fraction_of_total_miro_static.csv"),
-    ("peripheral_to_perinuclear_ratio", "peripheral_to_perinuclear_ratio_static.csv"),
-]
-
 # Detection-dependent metrics (edge spots)
 EDGE_SPOT_METRICS = [
     ("edge_spot_fraction", "edge_spot_fraction_static.csv"),
@@ -37,7 +30,7 @@ OTHER_METRICS = [
 ]
 
 # All metrics combined
-ALL_METRICS = PERIPHERAL_METRICS + EDGE_SPOT_METRICS + OTHER_METRICS
+ALL_METRICS = EDGE_SPOT_METRICS + OTHER_METRICS
 
 
 class FigureAggregator:
