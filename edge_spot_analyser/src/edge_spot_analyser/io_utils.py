@@ -799,3 +799,88 @@ def get_parameters_for_date(config: dict[str, dict[str, Any]], date: str) -> dic
         params.update(config[date])
 
     return params
+
+
+def extract_figure_inclusions(config_path: Path) -> set[tuple[str, str]]:
+    """
+    Extract all (date, well) pairs from Figure sheets in config Excel file.
+
+    This parses all Figure sheets and extracts every date/well combination,
+    which can be used to filter images to only process those needed for figures.
+
+    Args:
+        config_path: Path to Excel config file with Figure sheets
+
+    Returns:
+        Set of (date, well) tuples, e.g., {('230912', 'B02'), ('231120_1', 'D06')}
+    """
+    config_path = Path(config_path)
+    excel = pd.ExcelFile(config_path)
+
+    # Detect figure sheets (same logic as figure_aggregation.py)
+    non_figure_sheets = {"Otsu_params", "Aggregate", "Figures"}
+
+    # Check for Fig-prefixed sheets first (backwards compatible)
+    fig_sheets = [
+        s for s in excel.sheet_names if s.startswith("Fig") and s not in non_figure_sheets
+    ]
+    if not fig_sheets:
+        # Otherwise, use all sheets except known non-figure sheets
+        fig_sheets = [s for s in excel.sheet_names if s not in non_figure_sheets]
+
+    inclusions: set[tuple[str, str]] = set()
+
+    for sheet_name in fig_sheets:
+        try:
+            fig_df = pd.read_excel(config_path, sheet_name=sheet_name, header=0)
+
+            # First column is dates, rest are conditions
+            date_col = fig_df.columns[0]
+            conditions = [c for c in fig_df.columns[1:] if not str(c).startswith("Unnamed")]
+
+            for _, row in fig_df.iterrows():
+                date_val = row[date_col]
+                if pd.isna(date_val):
+                    continue
+
+                # Convert date to string (handle int, float, or string with suffix)
+                if isinstance(date_val, str):
+                    date_str = date_val.strip()
+                else:
+                    date_str = str(int(date_val))
+
+                for condition in conditions:
+                    well_val = row[condition]
+                    if pd.isna(well_val):
+                        continue
+
+                    # Handle comma-separated wells (e.g., "B06,D06,B07")
+                    wells = [w.strip() for w in str(well_val).split(",")]
+                    for well in wells:
+                        if well:
+                            inclusions.add((date_str, well))
+
+        except Exception as e:
+            logger.warning(f"Error parsing figure sheet {sheet_name}: {e}")
+
+    logger.info(
+        f"Extracted {len(inclusions)} (date, well) pairs from {len(fig_sheets)} figure sheets"
+    )
+    return inclusions
+
+
+def should_include_image(image_pair: ImagePair, inclusions: set[tuple[str, str]] | None) -> bool:
+    """
+    Check if an image pair should be included based on figure inclusions.
+
+    Args:
+        image_pair: ImagePair to check
+        inclusions: Set of (date, well) tuples to include, or None to include all
+
+    Returns:
+        True if image should be included, False otherwise
+    """
+    if inclusions is None:
+        return True
+
+    return (image_pair.date, image_pair.well_number) in inclusions

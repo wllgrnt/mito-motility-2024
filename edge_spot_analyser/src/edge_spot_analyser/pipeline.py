@@ -32,9 +32,11 @@ from edge_spot_analyser.io_utils import (
     FileDiscovery,
     ImageLoader,
     ImagePair,
+    extract_figure_inclusions,
     get_parameters_for_date,
     load_parameter_config,
     should_exclude_image,
+    should_include_image,
 )
 from edge_spot_analyser.measurements import combine_measurements_for_export
 from edge_spot_analyser.segmentation import (
@@ -183,6 +185,7 @@ class Pipeline:
         self.edge_spot_params = edge_spot_params or EdgeSpotParams()
         self.perinuclear_params = perinuclear_params or PerinuclearRegionParams()
         self._current_exclusions: set[tuple[str, int]] = set()  # (well, xy) pairs to exclude
+        self._figure_inclusions: set[tuple[str, str]] | None = None  # (date, well) pairs to include
 
     def process_image_pair(
         self, image_pair: ImagePair, image_number: int
@@ -334,6 +337,19 @@ class Pipeline:
             return
 
         logger.info(f"Found {len(image_pairs)} image pairs")
+
+        # Filter by figure inclusions (--figures-only mode)
+        if self._figure_inclusions is not None:
+            original_count = len(image_pairs)
+            image_pairs = [
+                ip for ip in image_pairs if should_include_image(ip, self._figure_inclusions)
+            ]
+            filtered_count = original_count - len(image_pairs)
+            if filtered_count > 0:
+                logger.info(
+                    f"Filtered {filtered_count} images not in figure sheets "
+                    f"({len(image_pairs)} remaining)"
+                )
 
         # Filter out excluded images
         if self._current_exclusions:
@@ -499,6 +515,19 @@ class Pipeline:
         # Update exclusions for current date
         self._current_exclusions = params.get("exclusions", set())
 
+    def load_figure_inclusions(self, config_path: Path) -> None:
+        """
+        Load figure inclusions from config file.
+
+        When set, only images whose (date, well) appear in Figure sheets
+        will be processed.
+
+        Args:
+            config_path: Path to Excel config file with Figure sheets
+        """
+        self._figure_inclusions = extract_figure_inclusions(config_path)
+        logger.info(f"Loaded {len(self._figure_inclusions)} figure inclusions")
+
 
 def main():
     """Main entry point for CLI."""
@@ -574,6 +603,12 @@ Examples:
         help="Generate plots during aggregation (requires matplotlib)",
     )
 
+    parser.add_argument(
+        "--figures-only",
+        action="store_true",
+        help="Only process images that appear in Figure sheets (requires --config)",
+    )
+
     args = parser.parse_args()
 
     # Handle workers
@@ -595,6 +630,13 @@ Examples:
 
     # Create pipeline
     pipeline = Pipeline()
+
+    # Load figure inclusions if --figures-only is set
+    if args.figures_only:
+        if not args.config:
+            logger.error("--figures-only requires --config to specify the Excel config file")
+            return
+        pipeline.load_figure_inclusions(args.config)
 
     # Process images
     start_time = time.time()
