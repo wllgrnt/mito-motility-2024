@@ -116,19 +116,38 @@ class IntensityMeasurements:
         """
         edge_intensities = {}
 
+        if labels.max() == 0:
+            return pd.Series(edge_intensities, name="Intensity_MeanIntensityEdge")
+
+        # Pre-create structuring element (reuse for all objects)
+        disk_footprint = morphology.disk(dilation_radius)
+
         for region in measure.regionprops(labels):
-            # Get object mask
-            mask = labels == region.label
+            # Use bounding box for efficient per-object processing
+            minr, minc, maxr, maxc = region.bbox
+            # Expand bounding box by dilation_radius for dilation
+            pad = dilation_radius
+            minr_pad = max(0, minr - pad)
+            minc_pad = max(0, minc - pad)
+            maxr_pad = min(labels.shape[0], maxr + pad)
+            maxc_pad = min(labels.shape[1], maxc + pad)
+
+            # Extract ROIs
+            roi_labels = labels[minr_pad:maxr_pad, minc_pad:maxc_pad]
+            roi_intensity = intensity_image[minr_pad:maxr_pad, minc_pad:maxc_pad]
+
+            # Get object mask within ROI
+            mask = roi_labels == region.label
 
             # Dilate by dilation_radius
-            dilated_mask = morphology.binary_dilation(mask, morphology.disk(dilation_radius))
+            dilated_mask = morphology.binary_dilation(mask, disk_footprint)
 
             # Edge is dilated - original
             edge_mask = dilated_mask & ~mask
 
             # Calculate mean edge intensity
             if edge_mask.sum() > 0:
-                edge_intensity = intensity_image[edge_mask].mean()
+                edge_intensity = roi_intensity[edge_mask].mean()
             else:
                 edge_intensity = 0.0
 

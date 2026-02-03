@@ -322,17 +322,27 @@ def _fill_holes_in_labels(labels: np.ndarray) -> np.ndarray:
     Returns:
         Labeled image with holes filled in each object
     """
+    if labels.max() == 0:
+        return labels
+
     output = labels.copy()  # Start with original labels to preserve existing assignments
 
-    for label_id in range(1, labels.max() + 1):
-        # Extract single object mask
-        obj_mask = labels == label_id
+    # Use regionprops to iterate only over existing labels (not all possible integers)
+    # and get bounding boxes for efficient per-object processing
+    for region in measure.regionprops(labels):
+        label_id = region.label
+        # Use bounding box to work on smaller region
+        minr, minc, maxr, maxc = region.bbox
+        # Extract region of interest
+        roi_labels = labels[minr:maxr, minc:maxc]
+        roi_output = output[minr:maxr, minc:maxc]
+        # Get mask for this object within the ROI
+        obj_mask = roi_labels == label_id
         # Fill holes in this object
         filled = ndimage.binary_fill_holes(obj_mask)
         # Only fill holes that don't overlap with other objects
-        # This prevents merging adjacent objects whose filled holes would touch
-        new_pixels = filled & (output == 0)
-        output[new_pixels] = label_id
+        new_pixels = filled & (roi_output == 0)
+        roi_output[new_pixels] = label_id
 
     return output
 
@@ -349,18 +359,23 @@ def _filter_objects_by_size(labels: np.ndarray, size_min: int, size_max: int) ->
     Returns:
         Filtered labeled image
     """
+    if labels.max() == 0:
+        return labels
+
     # Get region properties
     props = measure.regionprops(labels)
 
     # Create mask of objects to keep
-    keep_labels = [prop.label for prop in props if size_min <= prop.area <= size_max]
+    keep_labels = np.array(
+        [prop.label for prop in props if size_min <= prop.area <= size_max], dtype=labels.dtype
+    )
 
-    # Create filtered image
-    filtered = np.zeros_like(labels)
-    for label in keep_labels:
-        filtered[labels == label] = label
+    if len(keep_labels) == 0:
+        return np.zeros_like(labels)
 
-    return filtered
+    # Vectorized filtering using np.isin (single pass over image)
+    keep_mask = np.isin(labels, keep_labels)
+    return np.where(keep_mask, labels, 0)
 
 
 def create_perinuclear_regions(
@@ -607,25 +622,42 @@ def filter_edge_spots_by_edge_intensity(
     # Calculate edge intensity for each spot
     filtered = np.zeros_like(edge_spots_labels)
 
+    # Pre-create structuring element (reuse for all spots)
+    disk_footprint = morphology.disk(1)
+
     for region in measure.regionprops(edge_spots_labels):
-        # Get object mask
-        mask = edge_spots_labels == region.label
+        # Use bounding box for efficient per-object processing
+        minr, minc, maxr, maxc = region.bbox
+        # Expand bounding box by 1 pixel for dilation
+        pad = 1
+        minr_pad = max(0, minr - pad)
+        minc_pad = max(0, minc - pad)
+        maxr_pad = min(edge_spots_labels.shape[0], maxr + pad)
+        maxc_pad = min(edge_spots_labels.shape[1], maxc + pad)
+
+        # Extract ROIs
+        roi_labels = edge_spots_labels[minr_pad:maxr_pad, minc_pad:maxc_pad]
+        roi_miro = miro_image[minr_pad:maxr_pad, minc_pad:maxc_pad]
+
+        # Get object mask within ROI
+        mask = roi_labels == region.label
 
         # Dilate by 1 pixel
-        dilated_mask = morphology.binary_dilation(mask, morphology.disk(1))
+        dilated_mask = morphology.binary_dilation(mask, disk_footprint)
 
         # Edge is dilated - original
         edge_mask = dilated_mask & ~mask
 
         # Calculate mean edge intensity
         if edge_mask.sum() > 0:
-            edge_intensity = miro_image[edge_mask].mean()
+            edge_intensity = roi_miro[edge_mask].mean()
         else:
             edge_intensity = 0.0
 
-        # Keep if within range
+        # Keep if within range - write to full filtered array
         if min_edge_intensity <= edge_intensity <= max_edge_intensity:
-            filtered[mask] = region.label
+            full_mask = edge_spots_labels == region.label
+            filtered[full_mask] = region.label
 
     # Relabel consecutively
     filtered = measure.label(filtered > 0)
@@ -658,15 +690,42 @@ def filter_edge_spots_by_nuclei_proximity(
 
     filtered = np.zeros_like(edge_spots_labels)
 
-    for region in measure.regionprops(edge_spots_labels):
-        # Get object mask
-        mask = edge_spots_labels == region.label
+    # Pre-create structuring element for expansion (reuse for all spots)
+    expansion_disk = morphology.disk(expansion_radius)
 
-        # Check if original spot touches nuclei mask
-        if not np.any(mask & (expand_nuclei_mask > 0)):
+    # Convert nuclei mask to boolean once
+    nuclei_bool = expand_nuclei_mask > 0
+
+    for region in measure.regionprops(edge_spots_labels):
+        # Use bounding box for efficient per-object processing
+        minr, minc, maxr, maxc = region.bbox
+
+        # Extract ROIs for overlap check
+        roi_labels = edge_spots_labels[minr:maxr, minc:maxc]
+        roi_nuclei = nuclei_bool[minr:maxr, minc:maxc]
+
+        # Get object mask within ROI
+        mask_roi = roi_labels == region.label
+
+        # Check if original spot touches nuclei mask (using ROI for speed)
+        if not np.any(mask_roi & roi_nuclei):
             # Keep this spot (doesn't touch nuclei) and expand it
-            expanded = morphology.binary_dilation(mask, morphology.disk(expansion_radius))
-            filtered[expanded] = region.label
+            # Need to expand in padded ROI to avoid edge effects
+            pad = expansion_radius
+            minr_pad = max(0, minr - pad)
+            minc_pad = max(0, minc - pad)
+            maxr_pad = min(edge_spots_labels.shape[0], maxr + pad)
+            maxc_pad = min(edge_spots_labels.shape[1], maxc + pad)
+
+            # Get mask in padded ROI
+            roi_labels_pad = edge_spots_labels[minr_pad:maxr_pad, minc_pad:maxc_pad]
+            mask_pad = roi_labels_pad == region.label
+
+            # Expand the spot
+            expanded = morphology.binary_dilation(mask_pad, expansion_disk)
+
+            # Write back to filtered array
+            filtered[minr_pad:maxr_pad, minc_pad:maxc_pad][expanded] = region.label
 
     # Relabel consecutively
     return measure.label(filtered > 0)
