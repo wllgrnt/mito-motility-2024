@@ -671,19 +671,18 @@ def filter_edge_spots_by_nuclei_proximity(
     expansion_radius: int = 3,
 ) -> np.ndarray:
     """
-    Filter edge spots that touch the expanded nuclei mask, then expand kept spots.
+    Expand edge spots and exclude any that touch the expanded nuclei mask.
 
-    This filters out spots that overlap with the perinuclear region (likely
-    centrosomal rather than true peripheral spots), then expands the remaining
-    spots by expansion_radius pixels.
+    This filters out spots that are too close to the perinuclear region,
+    which are likely centrosomal rather than true peripheral spots.
 
     Args:
         edge_spots_labels: Labeled image of detected edge spots
         expand_nuclei_mask: Binary mask of expanded nuclei (15px expansion)
-        expansion_radius: Pixels to expand each kept edge spot after filtering
+        expansion_radius: Pixels to expand each edge spot before checking overlap
 
     Returns:
-        Filtered and expanded labeled image with perinuclear-adjacent spots removed
+        Filtered labeled image with perinuclear-adjacent spots removed
     """
     if edge_spots_labels.max() == 0:
         return edge_spots_labels
@@ -698,34 +697,28 @@ def filter_edge_spots_by_nuclei_proximity(
 
     for region in measure.regionprops(edge_spots_labels):
         # Use bounding box for efficient per-object processing
+        # Need padded ROI for expansion check
         minr, minc, maxr, maxc = region.bbox
+        pad = expansion_radius
+        minr_pad = max(0, minr - pad)
+        minc_pad = max(0, minc - pad)
+        maxr_pad = min(edge_spots_labels.shape[0], maxr + pad)
+        maxc_pad = min(edge_spots_labels.shape[1], maxc + pad)
 
-        # Extract ROIs for overlap check
-        roi_labels = edge_spots_labels[minr:maxr, minc:maxc]
-        roi_nuclei = nuclei_bool[minr:maxr, minc:maxc]
+        # Extract ROIs
+        roi_labels = edge_spots_labels[minr_pad:maxr_pad, minc_pad:maxc_pad]
+        roi_nuclei = nuclei_bool[minr_pad:maxr_pad, minc_pad:maxc_pad]
 
         # Get object mask within ROI
         mask_roi = roi_labels == region.label
 
-        # Check if original spot touches nuclei mask (using ROI for speed)
-        if not np.any(mask_roi & roi_nuclei):
-            # Keep this spot (doesn't touch nuclei) and expand it
-            # Need to expand in padded ROI to avoid edge effects
-            pad = expansion_radius
-            minr_pad = max(0, minr - pad)
-            minc_pad = max(0, minc - pad)
-            maxr_pad = min(edge_spots_labels.shape[0], maxr + pad)
-            maxc_pad = min(edge_spots_labels.shape[1], maxc + pad)
+        # Expand by expansion_radius
+        expanded_roi = morphology.binary_dilation(mask_roi, expansion_disk)
 
-            # Get mask in padded ROI
-            roi_labels_pad = edge_spots_labels[minr_pad:maxr_pad, minc_pad:maxc_pad]
-            mask_pad = roi_labels_pad == region.label
-
-            # Expand the spot
-            expanded = morphology.binary_dilation(mask_pad, expansion_disk)
-
-            # Write back to filtered array
-            filtered[minr_pad:maxr_pad, minc_pad:maxc_pad][expanded] = region.label
+        # Check if EXPANDED spot touches nuclei mask
+        if not np.any(expanded_roi & roi_nuclei):
+            # Keep ORIGINAL spot (not expanded)
+            filtered[minr_pad:maxr_pad, minc_pad:maxc_pad][mask_roi] = region.label
 
     # Relabel consecutively
     return measure.label(filtered > 0)
