@@ -283,11 +283,6 @@ def _declump_objects_watershed(
     # Compute distance transform
     distance = ndimage.distance_transform_edt(binary_mask)
 
-    # Find local maxima as seeds (use min_distance to prevent over-segmentation)
-    coords = morphology.local_maxima(distance, indices=True)
-    mask = np.zeros(distance.shape, dtype=bool)
-    mask[tuple(coords)] = True
-
     # Apply minimum distance constraint
     # Dilate each maximum by min_distance and keep only non-overlapping ones
     coords_array = peak_local_max(distance, min_distance=min_distance, labels=binary_mask)

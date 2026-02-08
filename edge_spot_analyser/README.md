@@ -39,23 +39,6 @@ This repo replicates the above steps, with the following differences:
 - Automatically generates the necessary figures from a spreadsheet mapping condition to (date,wellnumber).
 
 
-----
-(previous README below)
-Python port of a CellProfiler pipeline for analyzing mitochondrial distribution around nuclei.
-
-## Overview
-
-This pipeline analyzes the distribution of mitochondria (MIRO160mer) around nuclei in microscopy images. It identifies bright peripheral mitochondrial spots and quantifies their spatial distribution using metrics like Gini coefficient, mass displacement, and coefficient of variation.
-
-### What it does:
-
-1. **Segments nuclei** from Hoechst (405nm) channel using 3-class Otsu thresholding
-2. **Defines perinuclear regions** (ring between eroded nuclei and 10px expansion)
-3. **Detects bright peripheral mitochondrial spots** in MIRO160mer (488nm) channel
-4. **Quantifies distribution metrics**: Gini coefficient, coefficient of variation (CoV), mass displacement, moments (skewness, kurtosis)
-5. **Aggregates results** per date with edge spot fractions and summary statistics
-6. **Generates figure tables** combining data across dates for publication figures
-
 ## Quick Start
 
 ### Prerequisites
@@ -158,7 +141,7 @@ The pipeline can read parameters from an Excel file with an `Otsu_params` sheet 
 
 **Edge Spot Detection**
 - **`edge_spot_correction_factor`** (default: 2.0): Multiplier for threshold. Higher = fewer spots detected.
-- **`edge_spot_diameter_min`** / **`edge_spot_diameter_max`** (default: 5/80): Spot diameter range in pixels
+- **`edge_spot_diameter_min`** / **`edge_spot_diameter_max`** (default: 3/80): Spot diameter range in pixels
 
 ## Output Files
 
@@ -197,16 +180,6 @@ results/
 - **Moments**: Mean, standard deviation, skewness, kurtosis
 - **Edge spot fraction**: Proportion of nuclei with associated edge spots
 
-## Validation
-
-Compare Python output with CellProfiler reference:
-
-```bash
-uv run python -m edge_spot_analyser.validate_pipeline \
-  --cp_output example_CP_output/241223_siRNA_motor_JNK_wt_DRH/ \
-  --py_output results/241223/
-```
-
 ## Algorithm Details
 
 ### Nuclei Segmentation (Module 7)
@@ -225,9 +198,9 @@ uv run python -m edge_spot_analyser.validate_pipeline \
 1. Remove outliers: lowest 30%, highest 10%
 2. Calculate robust_mean = MEDIAN of remaining pixels
 3. Calculate robust_std = STD of remaining pixels
-4. Threshold = (robust_mean + 6×robust_std) × correction_factor
+4. Threshold = (robust_mean + 2×robust_std) × correction_factor
 5. Clip to [0.0035, 1.0]
-6. Apply Gaussian smoothing (σ=1.3) to binary mask
+6. Apply Gaussian smoothing (σ=0.65) to image before thresholding
 7. Simple connected component labeling (no declumping)
 
 ### Gini Coefficient (Module 19)
@@ -260,7 +233,7 @@ edge_spot_analyser/
 │   ├── io_utils.py            # File I/O, CSV export
 │   ├── aggregation.py         # Per-date aggregation (CLI: edge-spot-aggregate)
 │   ├── figure_aggregation.py  # Cross-date figure tables (CLI: edge-spot-figure-aggregate)
-│   └── validate_pipeline.py   # Validation against CellProfiler
+│   └── plotting.py            # Figure plotting (CLI: edge-spot-plot)
 ├── pipeline_files/            # Original CellProfiler pipeline JSON
 ├── inputs/                    # Input images (by date)
 ├── results/                   # Output CSVs (by date)
@@ -270,4 +243,4 @@ edge_spot_analyser/
 
 ## License
 
-MIT License. See [LICENSE](../LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.

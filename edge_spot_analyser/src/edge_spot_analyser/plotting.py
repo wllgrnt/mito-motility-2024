@@ -228,6 +228,7 @@ def create_figure(
         colors = plt.cm.tab10.colors[:n_conditions]
 
     x_positions = np.arange(n_conditions)
+    rng = np.random.default_rng(42)
 
     for i, (_condition, cond_data) in enumerate(data.items()):
         color = colors[i % len(colors)]
@@ -235,7 +236,7 @@ def create_figure(
         # Plot individual values (small points) with jitter
         individual = cond_data["individual_values"]
         if individual:
-            jitter = np.random.uniform(-jitter_width, jitter_width, len(individual))
+            jitter = rng.uniform(-jitter_width, jitter_width, len(individual))
             ax.scatter(
                 x_positions[i] + jitter,
                 individual,
@@ -249,7 +250,7 @@ def create_figure(
         # Plot replicate means (big points) with less jitter
         replicate_means = cond_data["replicate_means"]
         if replicate_means:
-            jitter = np.random.uniform(-jitter_width / 2, jitter_width / 2, len(replicate_means))
+            jitter = rng.uniform(-jitter_width / 2, jitter_width / 2, len(replicate_means))
             ax.scatter(
                 x_positions[i] + jitter,
                 replicate_means,

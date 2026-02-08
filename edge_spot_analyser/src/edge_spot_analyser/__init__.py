@@ -36,8 +36,10 @@ from edge_spot_analyser.segmentation import (
     create_perinuclear_regions,
     detect_edge_spots,
     filter_edge_spots_by_edge_intensity,
+    filter_edge_spots_by_nuclei_proximity,
     mask_peripheral_regions,
     segment_nuclei,
+    segment_nuclei_keep_border,
     smooth_image,
 )
 
@@ -54,6 +56,8 @@ __all__ = [
     "mask_peripheral_regions",
     "detect_edge_spots",
     "filter_edge_spots_by_edge_intensity",
+    "filter_edge_spots_by_nuclei_proximity",
+    "segment_nuclei_keep_border",
     # Measurements
     "IntensityMeasurements",
     "ImageMeasurements",
