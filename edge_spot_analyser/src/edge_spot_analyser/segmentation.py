@@ -663,7 +663,7 @@ def filter_edge_spots_by_edge_intensity(
 def filter_edge_spots_by_nuclei_proximity(
     edge_spots_labels: np.ndarray,
     expand_nuclei_mask: np.ndarray,
-    expansion_radius: int = 2,
+    expansion_radius: int = 3,
 ) -> np.ndarray:
     """
     Expand edge spots and exclude any that touch the expanded nuclei mask.

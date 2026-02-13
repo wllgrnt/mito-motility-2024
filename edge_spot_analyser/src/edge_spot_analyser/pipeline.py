@@ -126,7 +126,7 @@ def _process_single_image(args: tuple) -> dict[str, Any]:
             edge_spots_labels = filter_edge_spots_by_nuclei_proximity(
                 edge_spots_labels,
                 expand_nuclei_15px_all,
-                expansion_radius=2,
+                expansion_radius=3,
             )
 
         # Create perinuclear regions for INTERIOR nuclei only (for Gini analysis)
@@ -259,7 +259,7 @@ class Pipeline:
             edge_spots_labels = filter_edge_spots_by_nuclei_proximity(
                 edge_spots_labels,
                 expand_nuclei_15px_all,
-                expansion_radius=2,
+                expansion_radius=3,
             )
             n_edge_spots_proximity = edge_spots_labels.max()
             logger.debug(f"  {n_edge_spots_proximity} spots after nuclei proximity filter")
